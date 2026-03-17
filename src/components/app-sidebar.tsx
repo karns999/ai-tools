@@ -2,9 +2,7 @@
 
 import * as React from "react"
 
-import { NavDocuments } from "@/components/nav-documents"
 import { NavMain } from "@/components/nav-main"
-import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
@@ -15,7 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { LayoutDashboardIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, CameraIcon, FileTextIcon, Settings2Icon, CircleHelpIcon, SearchIcon, DatabaseIcon, FileChartColumnIcon, FileIcon, CommandIcon } from "lucide-react"
+import { LayoutDashboardIcon, DatabaseIcon, CommandIcon } from "lucide-react"
 
 const data = {
   user: {
@@ -26,28 +24,23 @@ const data = {
   navMain: [
     {
       title: "Task List",
-      url: "#",
+      url: "/dashboard/task-list",
       icon: (
-        <LayoutDashboardIcon
-        />
-      ),
-    },
-  ],
-  documents: [
-    {
-      name: "Prompt Lists",
-      url: "#",
-      icon: (
-        <DatabaseIcon
-        />
+        <LayoutDashboardIcon />
       ),
     },
     {
-      name: "Prompt Mode List",
-      url: "#",
+      title: "Prompt List",
+      url: "/dashboard/prompt-list",
       icon: (
-       <DatabaseIcon
-        />
+        <DatabaseIcon />
+      ),
+    },
+    {
+      title: "Prompt Mode List",
+      url: "/dashboard/prompt-mode-list",
+      icon: (
+        <DatabaseIcon />
       ),
     },
   ],
@@ -76,7 +69,6 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavDocuments items={data.documents} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={currentUser} />

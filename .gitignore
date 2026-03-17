@@ -17,6 +17,12 @@
 /.next/
 /out/
 
+# vscode
+/.vscode/
+
+# kiro
+/.kiro/
+
 # production
 /build
 
