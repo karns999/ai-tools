@@ -22,6 +22,11 @@ export default async function DashboardLayout({
     avatar: user.user_metadata?.avatar_url || "",
   }
 
+  const { data: promptModes } = await supabase
+    .from("prompt_modes")
+    .select("id, name")
+    .order("created_at", { ascending: false })
+
   return (
     <SidebarProvider
       style={
@@ -31,7 +36,7 @@ export default async function DashboardLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" user={sidebarUser} />
+      <AppSidebar variant="inset" user={sidebarUser} promptModes={promptModes ?? []} />
       <SidebarInset>
         <SiteHeader />
         <div className="flex flex-1 flex-col">

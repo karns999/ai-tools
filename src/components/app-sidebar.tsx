@@ -46,8 +46,9 @@ const data = {
   ],
 }
 
-export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sidebar> & {
+export function AppSidebar({ user, promptModes, ...props }: React.ComponentProps<typeof Sidebar> & {
   user?: { name: string; email: string; avatar: string }
+  promptModes?: { id: string; name: string }[]
 }) {
   const currentUser = user || data.user
   return (
@@ -68,7 +69,7 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain items={data.navMain} promptModes={promptModes ?? []} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={currentUser} />

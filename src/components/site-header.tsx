@@ -5,7 +5,8 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
 const titleMap: Record<string, string> = {
-  "/dashboard": "Task List",
+  "/dashboard": "Dashboard",
+  "/dashboard/task-list": "Task List",
   "/dashboard/prompt-list": "Prompt Lists",
   "/dashboard/prompt-mode-list": "Prompt Mode List",
 }
