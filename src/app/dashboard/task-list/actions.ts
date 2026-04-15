@@ -167,10 +167,10 @@ export async function startTask(
 
   if (fetchError || !task) return { data: null, error: fetchError?.message ?? "Task not found" }
 
-  // 2. Set status to suggest
+  // 2. Set status to suggest, clear downstream data
   await supabase
     .from("tasks")
-    .update({ status: "suggest", updated_at: new Date().toISOString() })
+    .update({ status: "suggest", scene_suggestions: [], generated_images: [], updated_at: new Date().toISOString() })
     .eq("id", taskId)
 
   // 3. Fetch prompt mode + associated prompts

@@ -314,7 +314,7 @@ function TaskDetail({
     setRemovedSavedRefs(new Set())
 
     // 3. Clear scene suggestions and set running status immediately
-    onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], status: "suggest" as const })
+    onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], status: "suggest" as const })
     setStarting(false)
 
     // 4. Start AI generation in background (no loading state)
