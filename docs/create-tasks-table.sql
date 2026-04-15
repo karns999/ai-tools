@@ -1,6 +1,7 @@
 -- Create tasks table
 create table tasks (
   id uuid primary key default gen_random_uuid(),
+  title text not null default '',
   image_url text not null,
   prompt_mode_id uuid not null references prompt_modes(id),
   status text not null default 'pending',

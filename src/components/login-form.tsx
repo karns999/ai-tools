@@ -52,11 +52,11 @@ export function LoginForm({
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">AI Tools</h1>
           <p className="text-sm text-balance text-muted-foreground">
-            please enter your email and password to log in.
+            请输入您的邮箱和密码登录
           </p>
         </div>
         <Field>
-          <FieldLabel htmlFor="email">account</FieldLabel>
+          <FieldLabel htmlFor="email">邮箱</FieldLabel>
           <Input
             id="email"
             type="email"
@@ -68,7 +68,7 @@ export function LoginForm({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="password">password</FieldLabel>
+          <FieldLabel htmlFor="password">密码</FieldLabel>
           <Input
             id="password"
             type="password"
@@ -80,7 +80,7 @@ export function LoginForm({
         </Field>
         <Field>
           <Button type="submit" disabled={loading}>
-            {loading ? "Login..." : "Login"}
+            {loading ? "登录中..." : "登录"}
           </Button>
         </Field>
       </FieldGroup>

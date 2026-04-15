@@ -23,21 +23,21 @@ const data = {
   },
   navMain: [
     {
-      title: "Task List",
+      title: "任务列表",
       url: "/dashboard/task-list",
       icon: (
         <LayoutDashboardIcon />
       ),
     },
     {
-      title: "Prompt List",
+      title: "Prompt 列表",
       url: "/dashboard/prompt-list",
       icon: (
         <DatabaseIcon />
       ),
     },
     {
-      title: "Prompt Mode List",
+      title: "Prompt 模式列表",
       url: "/dashboard/prompt-mode-list",
       icon: (
         <DatabaseIcon />

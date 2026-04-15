@@ -33,12 +33,12 @@ export function NavMain({
         <SidebarMenu>
           <SidebarMenuItem className="flex justify-center">
             <SidebarMenuButton
-              tooltip="Create Task"
+              tooltip="创建任务"
               className="w-auto px-6 !bg-indigo-600 !text-white rounded-md hover:!bg-indigo-500 active:!bg-indigo-500"
               onClick={() => setCreateOpen(true)}
             >
               <CirclePlusIcon className="size-4" />
-              <span>Create Task</span>
+              <span>创建任务</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

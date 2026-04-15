@@ -5,15 +5,15 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 
 const titleMap: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/dashboard/task-list": "Task List",
-  "/dashboard/prompt-list": "Prompt Lists",
-  "/dashboard/prompt-mode-list": "Prompt Mode List",
+  "/dashboard": "仪表盘",
+  "/dashboard/task-list": "任务列表",
+  "/dashboard/prompt-list": "Prompt 列表",
+  "/dashboard/prompt-mode-list": "Prompt 模式列表",
 }
 
 export function SiteHeader() {
   const pathname = usePathname()
-  const title = titleMap[pathname] || "Dashboard"
+  const title = titleMap[pathname] || "仪表盘"
 
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">

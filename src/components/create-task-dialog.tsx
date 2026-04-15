@@ -69,8 +69,8 @@ export function CreateTaskDialog({
   }
 
   async function handleCreate() {
-    if (images.length === 0) { toast.error("Please add at least one image"); return }
-    if (!promptModeId) { toast.error("Please select a Prompt Mode"); return }
+    if (images.length === 0) { toast.error("请至少添加一张图片"); return }
+    if (!promptModeId) { toast.error("请选择 Prompt 模式"); return }
 
     setCreating(true)
     const formData = new FormData()
@@ -81,11 +81,11 @@ export function CreateTaskDialog({
     if (error) {
       toast.error(error)
     } else {
-      toast.success(`${images.length} task(s) created`)
+      toast.success(`已创建 ${images.length} 个任务`)
       resetForm()
       onOpenChange(false)
       if (pathname === "/dashboard/task-list") {
-        router.refresh()
+        window.location.reload()
       }
     }
     setCreating(false)
@@ -95,14 +95,14 @@ export function CreateTaskDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v) }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create Task</DialogTitle>
+          <DialogTitle>创建任务</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4 py-2">
           <div className="flex flex-col gap-2">
-            <Label>Prompt Mode</Label>
+            <Label>Prompt 模式</Label>
             <Select value={promptModeId} onValueChange={setPromptModeId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select a prompt mode" />
+                <SelectValue placeholder="请选择 Prompt 模式" />
               </SelectTrigger>
               <SelectContent>
                 {promptModes.map((pm) => (
@@ -114,7 +114,7 @@ export function CreateTaskDialog({
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <Label>Images ({images.length})</Label>
+              <Label>图片 ({images.length})</Label>
               <Button
                 type="button"
                 size="sm"
@@ -122,7 +122,7 @@ export function CreateTaskDialog({
                 onClick={() => fileInputRef.current?.click()}
               >
                 <PlusIcon className="size-3" />
-                Add Images
+                添加图片
               </Button>
               <input
                 ref={fileInputRef}
@@ -162,17 +162,17 @@ export function CreateTaskDialog({
                 onClick={() => fileInputRef.current?.click()}
               >
                 <ImageIcon className="size-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">Click to add images</p>
+                <p className="text-sm text-muted-foreground">点击添加图片</p>
               </div>
             )}
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button variant="outline">Cancel</Button>
+            <Button variant="outline">取消</Button>
           </DialogClose>
           <Button onClick={handleCreate} disabled={creating}>
-            {creating ? "Creating..." : `Create ${images.length} Task(s)`}
+            {creating ? "创建中..." : `创建 ${images.length} 个任务`}
           </Button>
         </DialogFooter>
       </DialogContent>

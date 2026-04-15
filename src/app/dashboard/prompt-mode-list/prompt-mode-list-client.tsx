@@ -132,7 +132,7 @@ function PromptSelector({
         </div>
       )}
       {selected.length === 0 && (
-        <p className="text-xs text-muted-foreground">Click "Add" to add prompts</p>
+        <p className="text-xs text-muted-foreground">点击"添加"来添加 Prompt</p>
       )}
     </div>
   )
@@ -227,7 +227,7 @@ export function PromptModeListClient({
 
   async function handleDelete(id: string) {
     const { error } = await deletePromptMode(id)
-    if (error) { toast.error(error) } else { toast.success("Deleted"); setData((prev) => prev.filter((item) => item.id !== id)) }
+    if (error) { toast.error(error) } else { toast.success("已删除"); setData((prev) => prev.filter((item) => item.id !== id)) }
     setDeleteTarget(null)
   }
 
@@ -236,17 +236,17 @@ export function PromptModeListClient({
     if (selectedIds.length === 0) return
     const results = await Promise.all(selectedIds.map((id) => deletePromptMode(id)))
     const failed = results.filter((r) => r.error)
-    if (failed.length > 0) { toast.error(`${failed.length} failed to delete`) } else { toast.success(`${selectedIds.length} deleted`) }
+    if (failed.length > 0) { toast.error(`${failed.length} 个删除失败`) } else { toast.success(`已删除 ${selectedIds.length} 个`) }
     setData((prev) => prev.filter((item) => !selectedIds.includes(item.id)))
     setRowSelection({})
     setBatchDeleteOpen(false)
   }
 
   async function handleCreate() {
-    if (!form.name.trim() || !form.description.trim()) { toast.error("Name and description are required"); return }
+    if (!form.name.trim() || !form.description.trim()) { toast.error("名称和描述不能为空"); return }
     setCreating(true)
     const { data: newMode, error } = await createPromptMode(form)
-    if (error) { toast.error(error) } else if (newMode) { toast.success("Created"); setData((prev) => [newMode, ...prev]); setForm({ ...emptyForm }); setCreateOpen(false) }
+    if (error) { toast.error(error) } else if (newMode) { toast.success("已创建"); setData((prev) => [newMode, ...prev]); setForm({ ...emptyForm }); setCreateOpen(false) }
     setCreating(false)
   }
 
@@ -263,11 +263,11 @@ export function PromptModeListClient({
   }
 
   async function handleUpdate() {
-    if (!editForm.name.trim() || !editForm.description.trim()) { toast.error("Name and description are required"); return }
+    if (!editForm.name.trim() || !editForm.description.trim()) { toast.error("名称和描述不能为空"); return }
     setEditing(true)
     const { id, ...input } = editForm
     const { data: updated, error } = await updatePromptMode(id, input)
-    if (error) { toast.error(error) } else if (updated) { toast.success("Updated"); setData((prev) => prev.map((item) => (item.id === updated.id ? updated : item))); setEditOpen(false) }
+    if (error) { toast.error(error) } else if (updated) { toast.success("已更新"); setData((prev) => prev.map((item) => (item.id === updated.id ? updated : item))); setEditOpen(false) }
     setEditing(false)
   }
 
@@ -297,7 +297,7 @@ export function PromptModeListClient({
       ),
       meta: { className: "min-w-72" },
     },
-    { accessorKey: "name", header: "Name", meta: { className: "min-w-40" } },
+    { accessorKey: "name", header: "名称", meta: { className: "min-w-40" } },
     {
       accessorKey: "description",
       header: "Description",

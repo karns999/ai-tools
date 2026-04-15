@@ -67,7 +67,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
     if (error) {
       toast.error(error)
     } else {
-      toast.success("Deleted")
+      toast.success("已删除")
       setData((prev) => prev.filter((item) => item.id !== id))
     }
     setDeleteTarget(null)
@@ -79,9 +79,9 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
     const results = await Promise.all(selectedIds.map((id) => deletePrompt(id)))
     const failed = results.filter((r) => r.error)
     if (failed.length > 0) {
-      toast.error(`${failed.length} failed to delete`)
+      toast.error(`${failed.length} 个删除失败`)
     } else {
-      toast.success(`${selectedIds.length} deleted`)
+      toast.success(`已删除 ${selectedIds.length} 个`)
     }
     setData((prev) => prev.filter((item) => !selectedIds.includes(item.id)))
     setRowSelection({})
@@ -90,7 +90,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
 
   async function handleCreate() {
     if (!form.title.trim() || !form.content.trim()) {
-      toast.error("Title and content are required")
+      toast.error("标题和内容不能为空")
       return
     }
     setCreating(true)
@@ -98,7 +98,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
     if (error) {
       toast.error(error)
     } else if (newPrompt) {
-      toast.success("Created")
+      toast.success("已创建")
       setData((prev) => [newPrompt, ...prev])
       setForm({ title: "", content: "" })
       setCreateOpen(false)
@@ -113,7 +113,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
 
   async function handleUpdate() {
     if (!editForm.title.trim() || !editForm.content.trim()) {
-      toast.error("Title and content are required")
+      toast.error("标题和内容不能为空")
       return
     }
     setEditing(true)
@@ -124,7 +124,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
     if (error) {
       toast.error(error)
     } else if (updated) {
-      toast.success("Updated")
+      toast.success("已更新")
       setData((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditOpen(false)
     }
@@ -161,7 +161,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
           <button
             onClick={() => {
               navigator.clipboard.writeText(row.getValue("id") as string)
-              toast.success("ID copied")
+              toast.success("已复制 ID")
             }}
             className="cursor-pointer text-muted-foreground hover:text-foreground"
           >
@@ -171,28 +171,28 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       ),
       meta: { className: "min-w-72" },
     },
-    { accessorKey: "title", header: "Title", meta: { className: "min-w-40" } },
+    { accessorKey: "title", header: "标题", meta: { className: "min-w-40" } },
     {
       accessorKey: "content",
-      header: "Content",
+      header: "内容",
       cell: ({ row }) => (
         <span className="line-clamp-2 whitespace-pre-wrap break-words">{row.getValue("content")}</span>
       ),
       meta: { className: "min-w-64" },
     },
-    { accessorKey: "creator", header: "Creator", meta: { className: "min-w-40" } },
+    { accessorKey: "creator", header: "创建者", meta: { className: "min-w-40" } },
     {
       accessorKey: "created_at",
-      header: "Created At",
+      header: "创建时间",
       cell: ({ row }) => {
         const date = row.getValue("created_at") as string
         return date ? new Date(date).toLocaleDateString("zh-CN") : "-"
       },
     },
-    { accessorKey: "updater", header: "Updater", cell: ({ row }) => row.getValue("updater") || "-" },
+    { accessorKey: "updater", header: "更新者", cell: ({ row }) => row.getValue("updater") || "-" },
     {
       accessorKey: "updated_at",
-      header: "Updated At",
+      header: "更新时间",
       cell: ({ row }) => {
         const date = row.getValue("updated_at") as string
         return date ? new Date(date).toLocaleDateString("zh-CN") : "-"
@@ -209,12 +209,12 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => openEdit(row.original)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openEdit(row.original)}>编辑</DropdownMenuItem>
             <DropdownMenuItem
               className="text-destructive"
               onClick={() => setDeleteTarget(row.original.id)}
             >
-              Delete
+              删除
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -240,36 +240,36 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
           {selectedCount > 0 && (
            <Button size="sm" variant="destructive" onClick={() => setBatchDeleteOpen(true)}>
               <Trash2Icon className="size-4" />
-              Delete Prompt
+              删除 Prompt
             </Button>
           )}
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <PlusIcon className="size-4" />
-          Add Prompt
+          添加 Prompt
         </Button>
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Prompt</DialogTitle>
+            <DialogTitle>添加 Prompt</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="title">Title</Label>
+              <Label htmlFor="title">标题</Label>
               <Input
                 id="title"
-                placeholder="Enter prompt title"
+                placeholder="请输入标题"
                 value={form.title}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="content">Content</Label>
+              <Label htmlFor="content">内容</Label>
               <Textarea
                 id="content"
-                placeholder="Enter prompt content"
+                placeholder="请输入内容"
                 rows={4}
                 value={form.content}
                 onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
@@ -278,10 +278,10 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button variant="outline">取消</Button>
             </DialogClose>
             <Button onClick={handleCreate} disabled={creating}>
-              {creating ? "Creating..." : "Create"}
+              {creating ? "创建中..." : "创建"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -290,11 +290,11 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Prompt</DialogTitle>
+            <DialogTitle>编辑 Prompt</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="edit-title">Title</Label>
+              <Label htmlFor="edit-title">标题</Label>
               <Input
                 id="edit-title"
                 value={editForm.title}
@@ -302,7 +302,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="edit-content">Content</Label>
+              <Label htmlFor="edit-content">内容</Label>
               <Textarea
                 id="edit-content"
                 rows={4}
@@ -313,10 +313,10 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button variant="outline">取消</Button>
             </DialogClose>
             <Button onClick={handleUpdate} disabled={editing}>
-              {editing ? "Saving..." : "Save"}
+              {editing ? "保存中..." : "保存"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -358,7 +358,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
               ) : (
                 <TableRow>
                   <TableCell colSpan={columns.length} className="h-24 text-center">
-                    No data
+                    暂无数据
                   </TableCell>
                 </TableRow>
               )}
@@ -368,8 +368,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
 
         <div className="flex items-center justify-between py-4">
           <p className="text-sm text-muted-foreground">
-            {table.getFilteredSelectedRowModel().rows.length} of{" "}
-            {table.getFilteredRowModel().rows.length} row(s) selected
+            已选 {table.getFilteredSelectedRowModel().rows.length} / {table.getFilteredRowModel().rows.length} 行
           </p>
           <div className="flex gap-2">
             <Button
@@ -378,7 +377,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
               onClick={() => table.previousPage()}
               disabled={!table.getCanPreviousPage()}
             >
-              Previous
+              上一页
             </Button>
             <Button
               variant="outline"
@@ -386,7 +385,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
               onClick={() => table.nextPage()}
               disabled={!table.getCanNextPage()}
             >
-              Next
+              下一页
             </Button>
           </div>
         </div>
@@ -395,15 +394,15 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Prompt</AlertDialogTitle>
+            <AlertDialogTitle>删除 Prompt</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. Are you sure you want to delete this prompt?
+              此操作不可撤销，确定要删除吗？
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={() => deleteTarget && handleDelete(deleteTarget)}>
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -412,15 +411,15 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       <AlertDialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selectedCount} Prompts</AlertDialogTitle>
+            <AlertDialogTitle>删除 {selectedCount} 个 Prompt</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. Are you sure you want to delete the selected prompts?
+              此操作不可撤销，确定要删除选中的 Prompt 吗？
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={handleBatchDelete}>
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
