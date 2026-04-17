@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,11 +35,12 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import JSZip from "jszip"
 import { toast } from "sonner"
 import type { Task } from "@/lib/types/task"
 import type { PromptMode } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
-import { deleteTask, updateTask, uploadReferenceImages, startTask, generateSingleImage, finishImageGeneration } from "./actions"
+import { deleteTask, updateTask, uploadReferenceImages, startTask, generateSingleImage, fetchTasks } from "./actions"
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: "待处理", className: "bg-neutral-200 text-neutral-700 border-neutral-300" },
@@ -69,6 +70,39 @@ export function TaskListClient({
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const selected = tasks.find((t) => t.id === selectedId) ?? null
+
+  // Poll for task updates every 5 seconds when any task is in a processing state
+  useEffect(() => {
+    const hasProcessing = tasks.some((t) => t.status === "suggest" || t.status === "generating")
+    if (!hasProcessing) return
+
+    const interval = setInterval(async () => {
+      const { data } = await fetchTasks()
+      if (data) {
+        setTasks(data)
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [tasks])
+
+  // Track generating state per task so it persists across switches
+  const [generatingState, setGeneratingState] = useState<Record<string, {
+    generating: boolean
+    images: string[]
+    total: number
+  }>>({})
+
+  // Track selected suggestions per task
+  const [selectedSuggestionsMap, setSelectedSuggestionsMap] = useState<Record<string, Set<number>>>(() => {
+    const map: Record<string, Set<number>> = {}
+    for (const t of initialData) {
+      if (t.selected_suggestions && t.selected_suggestions.length > 0) {
+        map[t.id] = new Set(t.selected_suggestions)
+      }
+    }
+    return map
+  })
 
   const allChecked = tasks.length > 0 && checkedIds.size === tasks.length
 
@@ -162,10 +196,25 @@ export function TaskListClient({
       <div className="flex-1 overflow-y-auto">
         {selected ? (
           <TaskDetail
+            key={selected.id}
             task={selected}
             promptMode={promptModeMap[selected.prompt_mode_id] || null}
             promptMap={promptMap}
             onUpdate={handleTaskUpdate}
+            generatingState={generatingState[selected.id] || null}
+            onGeneratingStateChange={(state) => {
+              setGeneratingState((prev) => ({
+                ...prev,
+                [selected.id]: state,
+              }))
+            }}
+            selectedSuggestions={selectedSuggestionsMap[selected.id] || new Set()}
+            onSelectedSuggestionsChange={(s) => {
+              setSelectedSuggestionsMap((prev) => ({
+                ...prev,
+                [selected.id]: s,
+              }))
+            }}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -220,37 +269,33 @@ function TaskDetail({
   promptMode,
   promptMap,
   onUpdate,
+  generatingState,
+  onGeneratingStateChange,
+  selectedSuggestions,
+  onSelectedSuggestionsChange,
 }: {
   task: Task
   promptMode: PromptMode | null
   promptMap: Record<string, Pick<Prompt, "id" | "title" | "content">>
   onUpdate: (task: Task) => void
+  generatingState: { generating: boolean; images: string[]; total: number } | null
+  onGeneratingStateChange: (state: { generating: boolean; images: string[]; total: number }) => void
+  selectedSuggestions: Set<number>
+  onSelectedSuggestionsChange: (s: Set<number>) => void
 }) {
   const [title, setTitle] = useState(task.title || "")
   const [starting, setStarting] = useState(false)
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set())
-  const [generating, setGenerating] = useState(false)
-  const [generatingImages, setGeneratingImages] = useState<string[]>([])
-  const [generatingTotal, setGeneratingTotal] = useState(0)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set())
+  const taskIdRef = useRef(task.id)
+
+  const generating = generatingState?.generating ?? false
+  const generatingImages = generatingState?.images ?? []
+  const generatingTotal = generatingState?.total ?? 0
   const [referenceFiles, setReferenceFiles] = useState<{ file: File; preview: string }[]>([])
   const [removedSavedRefs, setRemovedSavedRefs] = useState<Set<number>>(new Set())
   const refInputRef = useRef<HTMLInputElement>(null)
-
-  // Sync state when switching tasks
-  const [prevId, setPrevId] = useState(task.id)
-  if (task.id !== prevId) {
-    setPrevId(task.id)
-    setTitle(task.title || "")
-    if (referenceFiles.length > 0) {
-      referenceFiles.forEach((f) => URL.revokeObjectURL(f.preview))
-      setReferenceFiles([])
-    }
-    setRemovedSavedRefs(new Set())
-    setSelectedSuggestions(new Set())
-  }
 
   function handleReferenceFiles(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -318,7 +363,9 @@ function TaskDetail({
     setStarting(false)
 
     // 4. Start AI generation in background (no loading state)
+    const currentTaskId = task.id
     startTask(task.id).then(({ data, error }) => {
+      if (taskIdRef.current !== currentTaskId) return // User switched, polling will pick up the update
       if (error) {
         toast.error(error)
         if (data) onUpdate(data)
@@ -476,7 +523,7 @@ function TaskDetail({
       <div className="flex justify-center mb-6">
         <Button
           onClick={handleStart}
-          disabled={starting}
+          disabled={starting || task.status === "suggest" || task.status === "generating" || generating}
           className="w-64"
           size="lg"
         >
@@ -509,7 +556,7 @@ function TaskDetail({
                   onClick={() => {
                     const next = new Set<number>()
                     qs.indexes.forEach((idx) => next.add(idx - 1))
-                    setSelectedSuggestions(next)
+                    onSelectedSuggestionsChange(next)
                   }}
                 >
                   {qs.label}（{qs.indexes.join(", ")}）
@@ -520,7 +567,7 @@ function TaskDetail({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setSelectedSuggestions(new Set())}
+                onClick={() => onSelectedSuggestionsChange(new Set())}
               >
                 清除选择
               </Button>
@@ -542,12 +589,10 @@ function TaskDetail({
                       : "hover:bg-neutral-200/70"
                   )}
                   onClick={() => {
-                    setSelectedSuggestions((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(i)) next.delete(i)
-                      else next.add(i)
-                      return next
-                    })
+                    const next = new Set(selectedSuggestions)
+                    if (next.has(i)) next.delete(i)
+                    else next.add(i)
+                    onSelectedSuggestionsChange(next)
                   }}
                 >
                   <p className="text-xs font-medium text-muted-foreground mb-1.5">场景 {i + 1}</p>
@@ -568,34 +613,40 @@ function TaskDetail({
             <Button
               className="w-64"
               size="lg"
-              disabled={generating}
+              disabled={generating || task.status === "generating"}
               onClick={async () => {
-                setGenerating(true)
+                onGeneratingStateChange({ generating: true, images: [], total: Array.from(selectedSuggestions).length })
                 const indexes = Array.from(selectedSuggestions).sort()
-                setGeneratingImages([])
-                setGeneratingTotal(indexes.length)
+                const currentTaskId = task.id
+
+                // Clear generated images and set status in DB first
+                await updateTask(task.id, { status: "generating", generated_images: [], selected_suggestions: indexes } as { status?: string; generated_images?: string[]; selected_suggestions?: number[] })
                 onUpdate({ ...task, generated_images: [], status: "generating" as const })
 
+                const collectedImages: string[] = []
                 for (const idx of indexes) {
+                  if (taskIdRef.current !== currentTaskId) break
                   const { imageUrl, error } = await generateSingleImage(task.id, idx)
+                  if (taskIdRef.current !== currentTaskId) break
                   if (error) {
                     toast.error(`场景 ${idx + 1} 生成失败: ${error}`)
                     continue
                   }
                   if (imageUrl) {
-                    setGeneratingImages((prev) => [...prev, imageUrl])
+                    collectedImages.push(imageUrl)
+                    onGeneratingStateChange({ generating: true, images: [...collectedImages], total: indexes.length })
                   }
                 }
 
-                const { data: finalTask, error: finishError } = await finishImageGeneration(task.id)
-                if (finishError) {
-                  toast.error(finishError)
-                } else if (finalTask) {
-                  onUpdate(finalTask)
+                // Backend auto-completes status when all images are done
+                // Refresh to get latest state
+                if (taskIdRef.current === currentTaskId) {
+                  const { data: refreshed } = await fetchTasks()
+                  const updated = refreshed?.find((t) => t.id === task.id)
+                  if (updated) onUpdate(updated)
+                  onGeneratingStateChange({ generating: false, images: [], total: 0 })
+                  toast.success("图片生成完成")
                 }
-                setGenerating(false)
-                setGeneratingTotal(0)
-                toast.success("图片生成完成")
               }}
             >
               {generating ? (
@@ -610,13 +661,21 @@ function TaskDetail({
       </div>
 
       {/* Generated Images */}
-      {(generating || (task.generated_images && task.generated_images.length > 0)) && (
+      {(generating || task.status === "generating" || (task.generated_images && task.generated_images.length > 0)) && (() => {
+        const isGenerating = generating || task.status === "generating"
+        const displayImages = generating ? generatingImages : (task.generated_images ?? [])
+        const totalCount = generating
+          ? generatingTotal
+          : (task.status === "generating" ? (task.selected_suggestions?.length ?? 0) : 0)
+        const skeletonCount = Math.max(0, totalCount - displayImages.length)
+
+        return (
         <>
           <hr className="mb-6 border-t" />
           <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
               <Label className="text-sm font-medium">生成结果</Label>
-              {!generating && task.generated_images && task.generated_images.length > 0 && (
+              {!isGenerating && task.generated_images && task.generated_images.length > 0 && (
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
@@ -638,24 +697,28 @@ function TaskDetail({
                       onClick={async () => {
                         const images = task.generated_images ?? []
                         const indexes = Array.from(selectedImages).sort()
+                        const zip = new JSZip()
                         for (const idx of indexes) {
                           const url = images[idx]
                           if (!url) continue
                           try {
                             const res = await fetch(url)
                             const blob = await res.blob()
-                            const blobUrl = URL.createObjectURL(blob)
-                            const a = document.createElement("a")
-                            a.href = blobUrl
-                            a.download = `${task.title || "image"}_${idx + 1}.jpg`
-                            document.body.appendChild(a)
-                            a.click()
-                            document.body.removeChild(a)
-                            URL.revokeObjectURL(blobUrl)
+                            const ext = blob.type.split("/")[1] || "jpg"
+                            zip.file(`${task.title || "image"}_${idx + 1}.${ext}`, blob)
                           } catch {
-                            toast.error(`图片 ${idx + 1} 下载失败`)
+                            toast.error(`图片 ${idx + 1} 获取失败`)
                           }
                         }
+                        const content = await zip.generateAsync({ type: "blob" })
+                        const blobUrl = URL.createObjectURL(content)
+                        const a = document.createElement("a")
+                        a.href = blobUrl
+                        a.download = `${task.title || "images"}.zip`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        URL.revokeObjectURL(blobUrl)
                         toast.success(`已下载 ${indexes.length} 张图片`)
                       }}
                     >
@@ -667,9 +730,9 @@ function TaskDetail({
               )}
             </div>
             <div className="grid grid-cols-3 gap-4">
-              {generating ? (
+              {isGenerating ? (
                 <>
-                  {generatingImages.map((url, i) => (
+                  {displayImages.map((url, i) => (
                     <div
                       key={`done-${i}`}
                       className="aspect-square rounded-xl border overflow-hidden bg-muted/30 cursor-pointer"
@@ -679,7 +742,7 @@ function TaskDetail({
                       <img src={url} alt={`生成图 ${i + 1}`} className="size-full object-contain" />
                     </div>
                   ))}
-                  {Array.from({ length: generatingTotal - generatingImages.length }).map((_, i) => (
+                  {Array.from({ length: skeletonCount }).map((_, i) => (
                     <div key={`skeleton-${i}`} className="aspect-square rounded-xl overflow-hidden">
                       <Skeleton className="size-full rounded-none" />
                     </div>
@@ -721,7 +784,8 @@ function TaskDetail({
             </div>
           </div>
         </>
-      )}
+        )
+      })()}
 
       {/* Lightbox */}
       <Dialog open={!!lightboxUrl} onOpenChange={(open) => !open && setLightboxUrl(null)}>

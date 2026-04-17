@@ -74,14 +74,8 @@ async function callOpenRouter(
 }
 
 /**
- * Generate scene suggestions based on product image, title, and prompt instructions.
- *
- * @param imageUrl - Public URL of the product image
- * @param title - Product title
- * @param rolePrompt - Role prompt instruction (used as system message)
- * @param keywords - Array of keyword prompt objects (title + content, used in user message)
- * @param options - Optional model/temperature overrides
- * @returns Array of scene suggestion strings
+ * Generate scene suggestions for all keywords in one request.
+ * Returns a JSON array to ensure reliable parsing.
  */
 export async function generateSceneSuggestions({
   imageUrl,
@@ -96,19 +90,14 @@ export async function generateSceneSuggestions({
   keywords: { title: string; content: string }[]
   options?: OpenRouterOptions
 }): Promise<{ suggestions: string[] | null; error: string | null }> {
-  // System message: role prompt
   const systemContent = rolePrompt?.trim()
-    || "You are a creative AI assistant that generates scene suggestions for product images."
+    ? `${rolePrompt.trim()}\n\n重要：请严格按照以上角色指令的要求生成内容，使用中文回复。`
+    : "你是一个专业的产品场景设计师，请用中文生成场景建议。"
 
-  // Build keyword section for user message
-  let keywordText = ""
-  if (keywords.length > 0) {
-    keywordText = "\n\n关键词指令：\n" + keywords
-      .map((k, i) => `${i + 1}. [${k.title}] ${k.content}`)
-      .join("\n")
-  }
+  const keywordList = keywords
+    .map((k, i) => `${i + 1}. [${k.title}] ${k.content}`)
+    .join("\n")
 
-  // User message: image + title + keywords
   const userContent: OpenRouterContentPart[] = [
     {
       type: "image_url",
@@ -116,7 +105,7 @@ export async function generateSceneSuggestions({
     },
     {
       type: "text",
-      text: `产品标题：${title}${keywordText}\n\n请根据以上产品图片、标题和关键词指令，生成场景建议。每个场景建议单独一行，用数字序号标注。`,
+      text: `产品标题：${title}\n\n关键词指令（共${keywords.length}条）：\n${keywordList}\n\n请严格根据角色指令的要求，结合产品图片和产品标题，为每条关键词指令各生成一条场景建议。\n\n要求：\n1. 必须生成恰好 ${keywords.length} 条场景建议，与关键词一一对应\n2. 使用中文回复\n3. 必须以 JSON 数组格式返回，例如：["场景1描述", "场景2描述"]\n4. 不要返回任何 JSON 以外的内容`,
     },
   ]
 
@@ -125,24 +114,35 @@ export async function generateSceneSuggestions({
     { role: "user", content: userContent },
   ]
 
-  const { data, error } = await callOpenRouter(messages, options)
+  const { data, error } = await callOpenRouter(messages, {
+    ...options,
+    temperature: options?.temperature ?? 0.7,
+  })
 
   if (error || !data) {
     return { suggestions: null, error: error ?? "No response from OpenRouter" }
   }
 
-  const content = data.choices[0]?.message?.content ?? ""
+  const content = (data.choices[0]?.message?.content ?? "").trim()
 
-  console.log("[OpenRouter] Raw response content:", JSON.stringify(content).slice(0, 500))
-  console.log("[OpenRouter] Full response:", JSON.stringify(data).slice(0, 1000))
+  // Extract JSON array from response (handle markdown code blocks)
+  const jsonMatch = content.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) {
+    console.error("[OpenRouter] Failed to parse JSON from:", content.slice(0, 500))
+    return { suggestions: null, error: "AI response is not valid JSON array" }
+  }
 
-  // Parse numbered lines into array
-  const suggestions = content
-    .split("\n")
-    .map((line) => line.replace(/^\d+[\.\)、]\s*/, "").trim())
-    .filter((line) => line.length > 0)
-
-  return { suggestions, error: null }
+  try {
+    const parsed = JSON.parse(jsonMatch[0])
+    if (!Array.isArray(parsed)) {
+      return { suggestions: null, error: "AI response is not an array" }
+    }
+    const suggestions = parsed.map((item: unknown) => String(item).trim()).filter((s: string) => s.length > 0)
+    return { suggestions, error: null }
+  } catch {
+    console.error("[OpenRouter] JSON parse error:", content.slice(0, 500))
+    return { suggestions: null, error: "Failed to parse AI response as JSON" }
+  }
 }
 
 

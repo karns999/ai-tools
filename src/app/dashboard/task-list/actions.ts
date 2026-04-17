@@ -74,7 +74,7 @@ export async function fetchTasks(): Promise<{ data: Task[] | null; error: string
 
 export async function updateTask(
   id: string,
-  input: { title?: string; status?: string; reference_urls?: string[] }
+  input: { title?: string; status?: string; reference_urls?: string[]; generated_images?: string[]; selected_suggestions?: number[] }
 ): Promise<{ data: Task | null; error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -195,7 +195,7 @@ export async function startTask(
       .map((p: { title: string; content: string }) => ({ title: p.title, content: p.content }))
   }
 
-  // 4. Call OpenRouter
+  // 4. Call OpenRouter with all keywords at once
   const { suggestions, error: aiError } = await generateSceneSuggestions({
     imageUrl: task.image_url,
     title: task.title || "",
@@ -204,7 +204,7 @@ export async function startTask(
   })
 
   // 5. Update task with results
-  if (aiError || !suggestions) {
+  if (aiError || !suggestions || suggestions.length === 0) {
     const { data: failedTask } = await supabase
       .from("tasks")
       .update({
@@ -303,16 +303,30 @@ export async function generateSingleImage(
 
   // Append to generated_images
   const currentImages: string[] = task.generated_images ?? []
+  const newImages = [...currentImages, finalUrl]
+  const selectedCount = task.selected_suggestions?.length ?? 0
+
+  // Check if all selected suggestions have been generated
+  const isComplete = selectedCount > 0 && newImages.length >= selectedCount
+  const updatePayload: Record<string, unknown> = {
+    generated_images: newImages,
+    updated_at: new Date().toISOString(),
+  }
+  if (isComplete) {
+    updatePayload.status = "complete"
+  }
+
   const { error: updateError } = await supabase
     .from("tasks")
-    .update({
-      generated_images: [...currentImages, finalUrl],
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", taskId)
 
   if (updateError) {
     return { imageUrl: null, error: updateError.message }
+  }
+
+  if (isComplete) {
+    revalidatePath("/dashboard/task-list")
   }
 
   return { imageUrl: finalUrl, error: null }
