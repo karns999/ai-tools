@@ -639,13 +639,21 @@ function TaskDetail({
                 }
 
                 // Backend auto-completes status when all images are done
+                // If all failed, set status to failed
+                if (collectedImages.length === 0) {
+                  await updateTask(task.id, { status: "failed" })
+                }
                 // Refresh to get latest state
                 if (taskIdRef.current === currentTaskId) {
                   const { data: refreshed } = await fetchTasks()
                   const updated = refreshed?.find((t) => t.id === task.id)
                   if (updated) onUpdate(updated)
                   onGeneratingStateChange({ generating: false, images: [], total: 0 })
-                  toast.success("图片生成完成")
+                  if (collectedImages.length === 0) {
+                    toast.error("所有图片生成失败")
+                  } else {
+                    toast.success("图片生成完成")
+                  }
                 }
               }}
             >
