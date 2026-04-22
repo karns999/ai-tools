@@ -40,7 +40,7 @@ import { toast } from "sonner"
 import type { Task } from "@/lib/types/task"
 import type { PromptMode } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
-import { deleteTask, updateTask, uploadReferenceImages, startTask, generateSingleImage, fetchTasks } from "./actions"
+import { deleteTask, updateTask, uploadReferenceImages, startSuggestGeneration, startImageGeneration, fetchTasks } from "./actions"
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: "待处理", className: "bg-neutral-200 text-neutral-700 border-neutral-300" },
@@ -85,13 +85,6 @@ export function TaskListClient({
 
     return () => clearInterval(interval)
   }, [tasks])
-
-  // Track generating state per task so it persists across switches
-  const [generatingState, setGeneratingState] = useState<Record<string, {
-    generating: boolean
-    images: string[]
-    total: number
-  }>>({})
 
   // Track selected suggestions per task
   const [selectedSuggestionsMap, setSelectedSuggestionsMap] = useState<Record<string, Set<number>>>(() => {
@@ -201,13 +194,6 @@ export function TaskListClient({
             promptMode={promptModeMap[selected.prompt_mode_id] || null}
             promptMap={promptMap}
             onUpdate={handleTaskUpdate}
-            generatingState={generatingState[selected.id] || null}
-            onGeneratingStateChange={(state) => {
-              setGeneratingState((prev) => ({
-                ...prev,
-                [selected.id]: state,
-              }))
-            }}
             selectedSuggestions={selectedSuggestionsMap[selected.id] || new Set()}
             onSelectedSuggestionsChange={(s) => {
               setSelectedSuggestionsMap((prev) => ({
@@ -269,8 +255,6 @@ function TaskDetail({
   promptMode,
   promptMap,
   onUpdate,
-  generatingState,
-  onGeneratingStateChange,
   selectedSuggestions,
   onSelectedSuggestionsChange,
 }: {
@@ -278,8 +262,6 @@ function TaskDetail({
   promptMode: PromptMode | null
   promptMap: Record<string, Pick<Prompt, "id" | "title" | "content">>
   onUpdate: (task: Task) => void
-  generatingState: { generating: boolean; images: string[]; total: number } | null
-  onGeneratingStateChange: (state: { generating: boolean; images: string[]; total: number }) => void
   selectedSuggestions: Set<number>
   onSelectedSuggestionsChange: (s: Set<number>) => void
 }) {
@@ -288,11 +270,7 @@ function TaskDetail({
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set())
-  const taskIdRef = useRef(task.id)
 
-  const generating = generatingState?.generating ?? false
-  const generatingImages = generatingState?.images ?? []
-  const generatingTotal = generatingState?.total ?? 0
   const [referenceFiles, setReferenceFiles] = useState<{ file: File; preview: string }[]>([])
   const [removedSavedRefs, setRemovedSavedRefs] = useState<Set<number>>(new Set())
   const refInputRef = useRef<HTMLInputElement>(null)
@@ -362,17 +340,9 @@ function TaskDetail({
     onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], status: "suggest" as const })
     setStarting(false)
 
-    // 4. Start AI generation in background (no loading state)
-    const currentTaskId = task.id
-    startTask(task.id).then(({ data, error }) => {
-      if (taskIdRef.current !== currentTaskId) return // User switched, polling will pick up the update
-      if (error) {
-        toast.error(error)
-        if (data) onUpdate(data)
-      } else if (data) {
-        toast.success("场景建议已生成")
-        onUpdate(data)
-      }
+    // 4. Start AI generation in background (server-side, doesn't depend on client)
+    startSuggestGeneration(task.id).then(({ error }) => {
+      if (error) toast.error(error)
     })
   }
 
@@ -523,7 +493,7 @@ function TaskDetail({
       <div className="flex justify-center mb-6">
         <Button
           onClick={handleStart}
-          disabled={starting || task.status === "suggest" || task.status === "generating" || generating}
+          disabled={starting || task.status === "suggest" || task.status === "generating"}
           className="w-64"
           size="lg"
         >
@@ -613,68 +583,35 @@ function TaskDetail({
             <Button
               className="w-64"
               size="lg"
-              disabled={generating || task.status === "generating"}
+              disabled={task.status === "generating"}
               onClick={async () => {
-                onGeneratingStateChange({ generating: true, images: [], total: Array.from(selectedSuggestions).length })
                 const indexes = Array.from(selectedSuggestions).sort()
-                const currentTaskId = task.id
-
-                // Clear generated images and set status in DB first
-                await updateTask(task.id, { status: "generating", generated_images: [], selected_suggestions: indexes } as { status?: string; generated_images?: string[]; selected_suggestions?: number[] })
                 onUpdate({ ...task, generated_images: [], status: "generating" as const })
-
-                const collectedImages: string[] = []
-                for (const idx of indexes) {
-                  if (taskIdRef.current !== currentTaskId) break
-                  const { imageUrl, error } = await generateSingleImage(task.id, idx)
-                  if (taskIdRef.current !== currentTaskId) break
-                  if (error) {
-                    toast.error(`场景 ${idx + 1} 生成失败: ${error}`)
-                    continue
-                  }
-                  if (imageUrl) {
-                    collectedImages.push(imageUrl)
-                    onGeneratingStateChange({ generating: true, images: [...collectedImages], total: indexes.length })
-                  }
-                }
-
-                // Backend auto-completes status when all images are done
-                // If all failed, set status to failed
-                if (collectedImages.length === 0) {
-                  await updateTask(task.id, { status: "failed" })
-                }
-                // Refresh to get latest state
-                if (taskIdRef.current === currentTaskId) {
-                  const { data: refreshed } = await fetchTasks()
-                  const updated = refreshed?.find((t) => t.id === task.id)
-                  if (updated) onUpdate(updated)
-                  onGeneratingStateChange({ generating: false, images: [], total: 0 })
-                  if (collectedImages.length === 0) {
-                    toast.error("所有图片生成失败")
-                  } else {
-                    toast.success("图片生成完成")
-                  }
+                const { error } = await startImageGeneration(task.id, indexes)
+                if (error) {
+                  toast.error(`启动生图失败: ${error}`)
+                  onUpdate({ ...task, status: "failed" as const })
                 }
               }}
             >
-              {generating ? (
+              {task.status === "generating" ? (
                 <Loader2Icon className="size-4 animate-spin" />
               ) : (
                 <ImageIcon className="size-4" />
               )}
-              {generating ? "生成中..." : `开始生图（${selectedSuggestions.size} 个场景）`}
+              {task.status === "generating"
+                ? `生成中 (${(task.generated_images?.length ?? 0) + (task.failed_suggestions?.length ?? 0)}/${task.selected_suggestions?.length ?? 0})...`
+                : `开始生图（${selectedSuggestions.size} 个场景）`}
             </Button>
           </div>
         )}
       </div>
 
       {/* Generated Images */}
-      {(generating || task.status === "generating" || (task.generated_images && task.generated_images.length > 0)) && (() => {
-        const isGenerating = generating || task.status === "generating"
-        const displayImages = generating ? generatingImages : (task.generated_images ?? [])
-        const totalCount = generating
-          ? generatingTotal
-          : (task.status === "generating" ? (task.selected_suggestions?.length ?? 0) : 0)
+      {(task.status === "generating" || (task.generated_images && task.generated_images.length > 0)) && (() => {
+        const isGenerating = task.status === "generating"
+        const displayImages = task.generated_images ?? []
+        const totalCount = task.status === "generating" ? (task.selected_suggestions?.length ?? 0) : 0
         const skeletonCount = Math.max(0, totalCount - displayImages.length)
 
         return (
@@ -799,7 +736,7 @@ function TaskDetail({
       <Dialog open={!!lightboxUrl} onOpenChange={(open) => !open && setLightboxUrl(null)}>
         <DialogContent className="!max-w-[90vw] !sm:max-w-[90vw] max-h-[90vh] w-fit p-2" showCloseButton={false}>
           {lightboxUrl && (() => {
-            const images = generating ? generatingImages : (task.generated_images ?? [])
+            const images = task.generated_images ?? []
             const hasPrev = lightboxIndex > 0
             const hasNext = lightboxIndex < images.length - 1
             return (

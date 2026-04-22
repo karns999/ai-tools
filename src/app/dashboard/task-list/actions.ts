@@ -74,7 +74,7 @@ export async function fetchTasks(): Promise<{ data: Task[] | null; error: string
 
 export async function updateTask(
   id: string,
-  input: { title?: string; status?: string; reference_urls?: string[]; generated_images?: string[]; selected_suggestions?: number[] }
+  input: { title?: string; status?: string; reference_urls?: string[]; generated_images?: string[]; selected_suggestions?: number[]; failed_suggestions?: number[] }
 ): Promise<{ data: Task | null; error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -196,6 +196,7 @@ export async function startTask(
   }
 
   // 4. Call OpenRouter with all keywords at once
+  console.log(`[startTask] task=${taskId} — calling AI with ${keywords.length} keywords...`)
   const { suggestions, error: aiError } = await generateSceneSuggestions({
     imageUrl: task.image_url,
     title: task.title || "",
@@ -205,6 +206,7 @@ export async function startTask(
 
   // 5. Update task with results
   if (aiError || !suggestions || suggestions.length === 0) {
+    console.log(`[startTask] task=${taskId} — AI FAILED: ${aiError}`)
     const { data: failedTask } = await supabase
       .from("tasks")
       .update({
@@ -219,8 +221,9 @@ export async function startTask(
     return { data: failedTask as Task, error: aiError ?? "AI generation failed" }
   }
 
-  const { data: updatedTask, error: updateError } = await supabase
-    .from("tasks")
+  console.log(`[startTask] task=${taskId} — AI SUCCESS: ${suggestions.length} suggestions`)
+
+  const { data: updatedTask, error: updateError } = await supabase    .from("tasks")
     .update({
       scene_suggestions: suggestions,
       status: "image",
@@ -268,6 +271,7 @@ export async function generateSingleImage(
     .single()
 
   // Call AI
+  console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — calling AI...`)
   const { imageUrl, error: genError } = await generateImage({
     productImageUrl: task.image_url,
     referenceImageUrls: task.reference_urls?.length > 0 ? task.reference_urls : undefined,
@@ -276,9 +280,31 @@ export async function generateSingleImage(
     title: task.title || undefined,
   })
 
+  const selectedCount = task.selected_suggestions?.length ?? 0
+
+  // Helper: check if all selected scenes are done (success + fail) and set final status
+  const checkAndFinalize = async (successCount: number, failCount: number) => {
+    const done = selectedCount > 0 && successCount + failCount >= selectedCount
+    console.log(`[generateSingleImage] task=${taskId} checkFinalize: success=${successCount} fail=${failCount} selected=${selectedCount} done=${done}`)
+    if (done) {
+      const finalStatus = successCount > 0 ? "complete" : "failed"
+      console.log(`[generateSingleImage] task=${taskId} — setting final status: ${finalStatus}`)
+      await supabase.from("tasks").update({ status: finalStatus, updated_at: new Date().toISOString() }).eq("id", taskId)
+      revalidatePath("/dashboard/task-list")
+    }
+  }
+
   if (genError || !imageUrl) {
+    console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — AI FAILED: ${genError}`)
+    // Record this scene as failed
+    const currentFailed: number[] = task.failed_suggestions ?? []
+    const newFailed = [...currentFailed, sceneIndex]
+    await supabase.from("tasks").update({ failed_suggestions: newFailed, updated_at: new Date().toISOString() }).eq("id", taskId)
+    await checkAndFinalize((task.generated_images ?? []).length, newFailed.length)
     return { imageUrl: null, error: genError ?? "AI generation failed" }
   }
+
+  console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — AI SUCCESS, url length=${imageUrl.length}`)
 
   // Upload to Supabase Storage if base64
   let finalUrl = imageUrl
@@ -294,6 +320,11 @@ export async function generateSingleImage(
       .upload(path, buffer, { contentType: mimeMatch?.[1] ?? "image/png" })
 
     if (uploadError) {
+      console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — UPLOAD FAILED: ${uploadError.message}`)
+      const currentFailed: number[] = task.failed_suggestions ?? []
+      const newFailed = [...currentFailed, sceneIndex]
+      await supabase.from("tasks").update({ failed_suggestions: newFailed, updated_at: new Date().toISOString() }).eq("id", taskId)
+      await checkAndFinalize((task.generated_images ?? []).length, newFailed.length)
       return { imageUrl: null, error: `Upload failed: ${uploadError.message}` }
     }
 
@@ -304,17 +335,18 @@ export async function generateSingleImage(
   // Append to generated_images
   const currentImages: string[] = task.generated_images ?? []
   const newImages = [...currentImages, finalUrl]
-  const selectedCount = task.selected_suggestions?.length ?? 0
+  const failedCount = (task.failed_suggestions ?? []).length
 
-  // Check if all selected suggestions have been generated
-  const isComplete = selectedCount > 0 && newImages.length >= selectedCount
   const updatePayload: Record<string, unknown> = {
     generated_images: newImages,
     updated_at: new Date().toISOString(),
   }
-  if (isComplete) {
-    updatePayload.status = "complete"
+  // Check if all done
+  if (selectedCount > 0 && newImages.length + failedCount >= selectedCount) {
+    updatePayload.status = newImages.length > 0 ? "complete" : "failed"
   }
+
+  console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — updating DB: images=${newImages.length} failed=${failedCount} selected=${selectedCount} newStatus=${updatePayload.status ?? "unchanged"}`)
 
   const { error: updateError } = await supabase
     .from("tasks")
@@ -325,7 +357,7 @@ export async function generateSingleImage(
     return { imageUrl: null, error: updateError.message }
   }
 
-  if (isComplete) {
+  if (updatePayload.status) {
     revalidatePath("/dashboard/task-list")
   }
 
@@ -360,6 +392,62 @@ export async function finishImageGeneration(
   if (error) return { data: null, error: error.message }
   revalidatePath("/dashboard/task-list")
   return { data: data as Task, error: null }
+}
+
+export async function startSuggestGeneration(
+  taskId: string
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Unauthorized" }
+
+  const { headers } = await import("next/headers")
+  const headersList = await headers()
+  const cookie = headersList.get("cookie") ?? ""
+  const host = headersList.get("host") ?? "localhost:3000"
+  const protocol = host.startsWith("localhost") ? "http" : "https"
+
+  const res = await fetch(`${protocol}://${host}/api/tasks/${taskId}/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    return { error: body.error ?? `Failed (${res.status})` }
+  }
+
+  revalidatePath("/dashboard/task-list")
+  return { error: null }
+}
+
+export async function startImageGeneration(
+  taskId: string,
+  indexes: number[]
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Unauthorized" }
+
+  const { headers } = await import("next/headers")
+  const headersList = await headers()
+  const cookie = headersList.get("cookie") ?? ""
+  const host = headersList.get("host") ?? "localhost:3000"
+  const protocol = host.startsWith("localhost") ? "http" : "https"
+
+  const res = await fetch(`${protocol}://${host}/api/tasks/${taskId}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify({ indexes }),
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    return { error: body.error ?? `Failed (${res.status})` }
+  }
+
+  revalidatePath("/dashboard/task-list")
+  return { error: null }
 }
 
 export async function deleteTask(id: string): Promise<{ error: string | null }> {
