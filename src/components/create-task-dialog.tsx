@@ -22,6 +22,7 @@ import {
 import { PlusIcon, XIcon, ImageIcon } from "lucide-react"
 import { toast } from "sonner"
 import { createTasks } from "@/app/dashboard/task-list/actions"
+import { createClient } from "@/lib/supabase/client"
 
 type PromptModeOption = { id: string; name: string }
 
@@ -68,16 +69,69 @@ export function CreateTaskDialog({
     setPromptModeId("")
   }
 
+  const [uploadProgress, setUploadProgress] = useState("")
+
   async function handleCreate() {
     if (images.length === 0) { toast.error("请至少添加一张图片"); return }
     if (!promptModeId) { toast.error("请选择 Prompt 模式"); return }
 
     setCreating(true)
-    const formData = new FormData()
-    formData.set("prompt_mode_id", promptModeId)
-    images.forEach((img) => formData.append("images", img.file))
+    setUploadProgress(`上传中 0/${images.length}`)
 
-    const { error } = await createTasks(formData)
+    const supabase = createClient()
+    let uploaded = 0
+
+    // Concurrent upload, max 5 at a time
+    const CONCURRENCY = 5
+    const imageUrls: (string | null)[] = new Array(images.length).fill(null)
+
+    const queue = images.map((img, i) => async () => {
+      const ext = img.file.name.split(".").pop() || "png"
+      const path = `tasks/${crypto.randomUUID()}.${ext}`
+
+      const { error: uploadError } = await supabase.storage
+        .from("images")
+        .upload(path, img.file)
+
+      if (uploadError) {
+        uploaded++
+        setUploadProgress(`上传中 ${uploaded}/${images.length}`)
+        return
+      }
+
+      const { data: urlData } = supabase.storage.from("images").getPublicUrl(path)
+      imageUrls[i] = urlData.publicUrl
+      uploaded++
+      setUploadProgress(`上传中 ${uploaded}/${images.length}`)
+    })
+
+    // Run with concurrency limit
+    const executing = new Set<Promise<void>>()
+    for (const task of queue) {
+      const p = task().then(() => { executing.delete(p) })
+      executing.add(p)
+      if (executing.size >= CONCURRENCY) {
+        await Promise.race(executing)
+      }
+    }
+    await Promise.all(executing)
+
+    const successUrls = imageUrls.filter(Boolean) as string[]
+    const failCount = images.length - successUrls.length
+
+    if (successUrls.length === 0) {
+      toast.error("所有图片上传失败")
+      setCreating(false)
+      setUploadProgress("")
+      return
+    }
+
+    if (failCount > 0) {
+      toast.warning(`${failCount} 张图片上传失败，已跳过`)
+    }
+
+    setUploadProgress("正在创建任务...")
+    const { error } = await createTasks({ promptModeId, imageUrls: successUrls })
     if (error) {
       toast.error(error)
     } else {
@@ -89,6 +143,7 @@ export function CreateTaskDialog({
       }
     }
     setCreating(false)
+    setUploadProgress("")
   }
 
   return (
@@ -172,7 +227,7 @@ export function CreateTaskDialog({
             <Button variant="outline">取消</Button>
           </DialogClose>
           <Button onClick={handleCreate} disabled={creating}>
-            {creating ? "创建中..." : `创建 ${images.length} 个任务`}
+            {creating ? uploadProgress : `创建 ${images.length} 个任务`}
           </Button>
         </DialogFooter>
       </DialogContent>

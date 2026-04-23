@@ -6,40 +6,16 @@ import type { Task } from "@/lib/types/task"
 import { revalidatePath } from "next/cache"
 
 export async function createTasks(
-  formData: FormData
+  input: { promptModeId: string; imageUrls: string[] }
 ): Promise<{ data: Task[] | null; error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: "Unauthorized" }
 
-  const promptModeId = formData.get("prompt_mode_id") as string
+  const { promptModeId, imageUrls } = input
   if (!promptModeId) return { data: null, error: "Prompt Mode is required" }
+  if (imageUrls.length === 0) return { data: null, error: "At least one image is required" }
 
-  const files = formData.getAll("images") as File[]
-  if (files.length === 0) return { data: null, error: "At least one image is required" }
-
-  // Upload images to Supabase Storage and collect URLs
-  const imageUrls: string[] = []
-  for (const file of files) {
-    const ext = file.name.split(".").pop() || "png"
-    const path = `tasks/${crypto.randomUUID()}.${ext}`
-
-    const { error: uploadError } = await supabase.storage
-      .from("images")
-      .upload(path, file)
-
-    if (uploadError) {
-      return { data: null, error: `Upload failed: ${uploadError.message}` }
-    }
-
-    const { data: urlData } = supabase.storage
-      .from("images")
-      .getPublicUrl(path)
-
-    imageUrls.push(urlData.publicUrl)
-  }
-
-  // Batch insert tasks
   const rows = imageUrls.map((url) => ({
     image_url: url,
     prompt_mode_id: promptModeId,
