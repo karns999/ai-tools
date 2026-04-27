@@ -27,6 +27,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { data: task } = await supabase.from("tasks").select("*").eq("id", taskId).single()
     if (!task) return
 
+    // Guard: if another generate call already reset the task, abort this one
+    if (JSON.stringify(task.selected_suggestions) !== JSON.stringify(indexes)) {
+      console.log(`[generate] task=${taskId} — indexes mismatch (stale after() call), aborting`)
+      return
+    }
+
     const { data: promptMode } = await supabase
       .from("prompt_modes")
       .select("role_prompt")

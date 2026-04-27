@@ -583,15 +583,18 @@ function TaskDetail({
             <Button
               className="w-64"
               size="lg"
-              disabled={task.status === "generating"}
+              disabled={task.status === "generating" || starting}
               onClick={async () => {
+                if (task.status === "generating" || starting) return
+                setStarting(true)
                 const indexes = Array.from(selectedSuggestions).sort()
-                onUpdate({ ...task, generated_images: [], status: "generating" as const })
+                onUpdate({ ...task, generated_images: [], failed_suggestions: [], selected_suggestions: indexes, status: "generating" as const })
                 const { error } = await startImageGeneration(task.id, indexes)
                 if (error) {
                   toast.error(`启动生图失败: ${error}`)
                   onUpdate({ ...task, status: "failed" as const })
                 }
+                setStarting(false)
               }}
             >
               {task.status === "generating" ? (
