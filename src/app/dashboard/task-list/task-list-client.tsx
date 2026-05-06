@@ -77,9 +77,14 @@ export function TaskListClient({
   const selected = tasks.find((t) => t.id === selectedId) ?? null
 
   const filteredTasks = useMemo(() => {
+    const sorted = [...tasks].sort((a, b) => {
+      const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      if (diff !== 0) return diff
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+    })
     const q = searchQuery.trim().toLowerCase()
-    if (!q) return tasks
-    return tasks.filter(
+    if (!q) return sorted
+    return sorted.filter(
       (t) =>
         (t.title ?? "").toLowerCase().includes(q) ||
         (t.creator ?? "").toLowerCase().includes(q)

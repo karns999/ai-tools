@@ -14,7 +14,7 @@ export default async function TaskListPage() {
   }
 
   const [{ data: tasks }, { data: promptModes }, { data: prompts }] = await Promise.all([
-    supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+    supabase.from("tasks").select("*").order("created_at", { ascending: false }).order("id", { ascending: false }),
     supabase.from("prompt_modes").select("*").order("created_at", { ascending: false }),
     supabase.from("prompts").select("id, title, content").order("created_at", { ascending: false }),
   ])

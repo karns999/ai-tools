@@ -16,11 +16,13 @@ export async function createTasks(
   if (!promptModeId) return { data: null, error: "Prompt Mode is required" }
   if (imageUrls.length === 0) return { data: null, error: "At least one image is required" }
 
-  const rows = imageUrls.map((url) => ({
+  const baseTime = Date.now()
+  const rows = imageUrls.map((url, i) => ({
     image_url: url,
     prompt_mode_id: promptModeId,
     status: "pending",
     creator: user.email!,
+    created_at: new Date(baseTime + i).toISOString(),
   }))
 
   const { data, error } = await supabase
@@ -43,6 +45,7 @@ export async function fetchTasks(): Promise<{ data: Task[] | null; error: string
     .from("tasks")
     .select("*")
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
 
   if (error) return { data: null, error: error.message }
   return { data: data as Task[], error: null }
