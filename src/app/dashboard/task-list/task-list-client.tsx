@@ -247,6 +247,11 @@ export function TaskListClient({
                 </span>
                 <Badge variant="outline" className={cn("text-xs w-fit font-medium", statusConfig[task.status].className)}>
                   {statusConfig[task.status].label}
+                  {task.status === "generating" && (() => {
+                    const done = (task.generated_images?.length ?? 0) + (task.failed_suggestions?.length ?? 0)
+                    const total = task.selected_suggestions?.length ?? 0
+                    return total > 0 ? ` ${done}/${total}` : ""
+                  })()}
                 </Badge>
               </div>
             </div>
