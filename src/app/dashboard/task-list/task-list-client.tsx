@@ -717,8 +717,16 @@ function TaskDetail({
       {(task.status === "generating" || (task.generated_images && task.generated_images.length > 0)) && (() => {
         const isGenerating = task.status === "generating"
         const displayImages = task.generated_images ?? []
-        const totalCount = task.status === "generating" ? (task.selected_suggestions?.length ?? 0) : 0
-        const skeletonCount = Math.max(0, totalCount - displayImages.length)
+        const selectedIndexes = task.selected_suggestions ?? []
+        const failedIndexes = task.failed_suggestions ?? []
+        const failedSet = new Set(failedIndexes)
+        // Scene index for each completed image (generated in order, skipping failed)
+        const sceneForImage = selectedIndexes.filter((idx) => !failedSet.has(idx))
+        // Remaining (pending) scene indexes for skeleton placeholders
+        const pendingScenes = isGenerating
+          ? selectedIndexes.slice(displayImages.length + failedIndexes.length)
+          : []
+        const skeletonCount = pendingScenes.length
 
         return (
         <>
@@ -783,54 +791,76 @@ function TaskDetail({
             <div className="grid grid-cols-3 gap-4">
               {isGenerating ? (
                 <>
-                  {displayImages.map((url, i) => (
-                    <div
-                      key={`done-${i}`}
-                      className="aspect-square rounded-xl border overflow-hidden bg-muted/30 cursor-pointer"
-                      onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
-                    </div>
-                  ))}
-                  {Array.from({ length: skeletonCount }).map((_, i) => (
-                    <div key={`skeleton-${i}`} className="aspect-square rounded-xl overflow-hidden">
-                      <Skeleton className="size-full rounded-none" />
-                    </div>
-                  ))}
+                  {displayImages.map((url, i) => {
+                    const sceneIdx = sceneForImage[i]
+                    return (
+                      <div key={`done-${i}`} className="flex flex-col gap-1.5">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          场景 {sceneIdx !== undefined ? sceneIdx + 1 : i + 1}
+                        </p>
+                        <div
+                          className="aspect-square rounded-xl border overflow-hidden bg-muted/30 cursor-pointer"
+                          onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {Array.from({ length: skeletonCount }).map((_, i) => {
+                    const sceneIdx = pendingScenes[i]
+                    return (
+                      <div key={`skeleton-${i}`} className="flex flex-col gap-1.5">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          场景 {sceneIdx !== undefined ? sceneIdx + 1 : "?"}
+                        </p>
+                        <div className="aspect-square rounded-xl overflow-hidden">
+                          <Skeleton className="size-full rounded-none" />
+                        </div>
+                      </div>
+                    )
+                  })}
                 </>
               ) : (
-                task.generated_images?.map((url, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "aspect-square rounded-xl border overflow-hidden bg-muted/30 relative group cursor-pointer transition-all",
-                      selectedImages.has(i) && "ring-2 ring-blue-500"
-                    )}
-                    onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`生成图 ${i + 1}`} className="size-full object-contain" />
-                    {/* Selection checkbox */}
-                    <div
-                      className="absolute top-2 left-2"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedImages((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(i)) next.delete(i)
-                          else next.add(i)
-                          return next
-                        })
-                      }}
-                    >
-                      <Checkbox
-                        checked={selectedImages.has(i)}
-                        className="bg-white/80"
-                      />
+                task.generated_images?.map((url, i) => {
+                  const sceneIdx = sceneForImage[i]
+                  return (
+                    <div key={i} className="flex flex-col gap-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        场景 {sceneIdx !== undefined ? sceneIdx + 1 : i + 1}
+                      </p>
+                      <div
+                        className={cn(
+                          "aspect-square rounded-xl border overflow-hidden bg-muted/30 relative group cursor-pointer transition-all",
+                          selectedImages.has(i) && "ring-2 ring-blue-500"
+                        )}
+                        onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
+                        {/* Selection checkbox */}
+                        <div
+                          className="absolute top-2 left-2"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedImages((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(i)) next.delete(i)
+                              else next.add(i)
+                              return next
+                            })
+                          }}
+                        >
+                          <Checkbox
+                            checked={selectedImages.has(i)}
+                            className="bg-white/80"
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>
