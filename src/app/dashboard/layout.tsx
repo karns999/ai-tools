@@ -29,6 +29,7 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider
+      className="h-svh"
       style={
         {
           "--sidebar-width": "calc(var(--spacing) * 72)",
@@ -37,10 +38,10 @@ export default async function DashboardLayout({
       }
     >
       <AppSidebar variant="inset" user={sidebarUser} promptModes={promptModes ?? []} />
-      <SidebarInset>
+      <SidebarInset className="min-h-0 overflow-hidden">
         <SiteHeader />
-        <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col gap-2">
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="@container/main flex flex-1 flex-col gap-2 min-h-0">
             {children}
           </div>
         </div>

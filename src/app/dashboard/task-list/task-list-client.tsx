@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  SearchIcon,
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -55,6 +56,8 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   completed: { label: "已完成", className: "bg-green-100 text-green-700 border-green-200" },
 }
 
+const PAGE_SIZE = 20
+
 export function TaskListClient({
   initialData,
   promptModeMap,
@@ -69,7 +72,36 @@ export function TaskListClient({
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
   const selected = tasks.find((t) => t.id === selectedId) ?? null
+
+  const filteredTasks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return tasks
+    return tasks.filter(
+      (t) =>
+        (t.title ?? "").toLowerCase().includes(q) ||
+        (t.creator ?? "").toLowerCase().includes(q)
+    )
+  }, [tasks, searchQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE))
+  const pageIndex = Math.min(currentPage, totalPages)
+  const paginatedTasks = useMemo(
+    () => filteredTasks.slice((pageIndex - 1) * PAGE_SIZE, pageIndex * PAGE_SIZE),
+    [filteredTasks, pageIndex]
+  )
+
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery])
+
+  // Clamp current page when filtered result shrinks (e.g. after delete / poll)
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages)
+  }, [currentPage, totalPages])
 
   // Poll for task updates every 5 seconds when any task is in a processing state
   useEffect(() => {
@@ -97,7 +129,8 @@ export function TaskListClient({
     return map
   })
 
-  const allChecked = tasks.length > 0 && checkedIds.size === tasks.length
+  const allChecked =
+    paginatedTasks.length > 0 && paginatedTasks.every((t) => checkedIds.has(t.id))
 
   function toggleCheck(id: string) {
     setCheckedIds((prev) => {
@@ -109,8 +142,15 @@ export function TaskListClient({
   }
 
   function toggleAll() {
-    if (allChecked) setCheckedIds(new Set())
-    else setCheckedIds(new Set(tasks.map((t) => t.id)))
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (allChecked) {
+        paginatedTasks.forEach((t) => next.delete(t.id))
+      } else {
+        paginatedTasks.forEach((t) => next.add(t.id))
+      }
+      return next
+    })
   }
 
   async function handleBatchDelete() {
@@ -132,9 +172,9 @@ export function TaskListClient({
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-1 min-h-0">
       {/* Left: Task List */}
-      <div className="w-[28rem] shrink-0 border-r flex flex-col">
+      <div className="w-[28rem] shrink-0 border-r flex flex-col min-h-0">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2">
             <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />
@@ -144,17 +184,41 @@ export function TaskListClient({
                 删除 ({checkedIds.size})
               </Button>
             ) : (
-              <h2 className="text-sm font-semibold">任务列表 ({tasks.length})</h2>
+              <h2 className="text-sm font-semibold">
+                任务列表 ({filteredTasks.length}
+                {searchQuery && filteredTasks.length !== tasks.length ? `/${tasks.length}` : ""})
+              </h2>
+            )}
+          </div>
+        </div>
+        <div className="px-4 py-2 border-b">
+          <div className="relative">
+            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索标题或创建人"
+              className="pl-8 pr-8 h-9"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                aria-label="Clear search"
+              >
+                <XIcon className="size-4" />
+              </button>
             )}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {tasks.length === 0 && (
+          {paginatedTasks.length === 0 && (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              暂无任务
+              {tasks.length === 0 ? "暂无任务" : "无匹配任务"}
             </div>
           )}
-          {tasks.map((task) => (
+          {paginatedTasks.map((task) => (
             <div
               key={task.id}
               className={cn(
@@ -183,10 +247,37 @@ export function TaskListClient({
             </div>
           ))}
         </div>
+        {filteredTasks.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-2 border-t text-xs text-muted-foreground">
+            <span>
+              第 {pageIndex} / {totalPages} 页
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={pageIndex <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeftIcon className="size-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={pageIndex >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRightIcon className="size-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right: Task Detail */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {selected ? (
           <TaskDetail
             key={selected.id}
@@ -475,7 +566,7 @@ function TaskDetail({
           {associatedPrompts.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
               {associatedPrompts.map((p, i) => (
-                <div key={p.id} className="rounded-lg bg-neutral-100 px-4 py-3">
+                <div key={`${p.id}-${i}`} className="rounded-lg bg-neutral-100 px-4 py-3">
                   <p className="text-xs font-medium text-muted-foreground mb-1.5">图片 {i + 1} · {p.title}</p>
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{p.content}</p>
                 </div>
