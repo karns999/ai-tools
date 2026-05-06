@@ -345,6 +345,8 @@ function TaskThumbnail({ url }: { url: string }) {
       <img
         src={url}
         alt=""
+        loading="lazy"
+        decoding="async"
         className="relative size-full object-cover"
       />
     </div>
@@ -486,7 +488,7 @@ function TaskDetail({
           {task.image_url ? (
             <div className="size-52 rounded-xl border overflow-hidden bg-muted/30">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={task.image_url} alt="Product" className="size-full object-contain" />
+              <img src={task.image_url} alt="Product" loading="lazy" decoding="async" className="size-full object-contain" />
             </div>
           ) : (
             <div className="size-52 rounded-xl border bg-muted/30 flex items-center justify-center">
@@ -503,7 +505,7 @@ function TaskDetail({
             {savedRefs.map((url, i) => !removedSavedRefs.has(i) && (
               <div key={`saved-${i}`} className="size-52 rounded-xl border overflow-hidden bg-muted/30 relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt={`参考图 ${i + 1}`} className="size-full object-contain" />
+                <img src={url} alt={`参考图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
                 <button
                   onClick={() => removeSavedRef(i)}
                   className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
@@ -516,7 +518,7 @@ function TaskDetail({
             {referenceFiles.map((ref, i) => (
               <div key={`new-${i}`} className="size-52 rounded-xl border overflow-hidden bg-muted/30 relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={ref.preview} alt={`参考图`} className="size-full object-contain" />
+                <img src={ref.preview} alt={`参考图`} loading="lazy" decoding="async" className="size-full object-contain" />
                 <button
                   onClick={() => removeReference(i)}
                   className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
@@ -788,7 +790,7 @@ function TaskDetail({
                       onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt={`生成图 ${i + 1}`} className="size-full object-contain" />
+                      <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
                     </div>
                   ))}
                   {Array.from({ length: skeletonCount }).map((_, i) => (
@@ -859,7 +861,7 @@ function TaskDetail({
                   </button>
                 )}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={lightboxUrl} alt="Preview" className="max-w-full max-h-[85vh] object-contain mx-auto rounded-lg" />
+                <img src={lightboxUrl} alt="Preview" decoding="async" className="max-w-full max-h-[85vh] object-contain mx-auto rounded-lg" />
                 {hasNext && (
                   <button
                     className="absolute right-2 z-10 flex size-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors cursor-pointer"

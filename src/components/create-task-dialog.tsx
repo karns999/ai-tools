@@ -196,6 +196,8 @@ export function CreateTaskDialog({
                     <img
                       src={img.preview}
                       alt={img.file.name}
+                      loading="lazy"
+                      decoding="async"
                       className="size-full object-cover"
                     />
                     <button
