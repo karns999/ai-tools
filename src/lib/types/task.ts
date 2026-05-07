@@ -1,3 +1,18 @@
+export type GeneratedImageItem = {
+  url: string
+  scene_index: number
+}
+
+export type GeneratedImageGroup = {
+  id: string
+  index: number
+  selected_suggestions: number[]
+  failed_suggestions: number[]
+  images: GeneratedImageItem[]
+  status: "generating" | "complete" | "failed"
+  created_at: string
+}
+
 export type Task = {
   id: string
   title: string
@@ -5,6 +20,7 @@ export type Task = {
   reference_urls: string[]
   scene_suggestions: string[]
   generated_images: string[]
+  generated_image_groups: GeneratedImageGroup[]
   selected_suggestions: number[]
   failed_suggestions: number[]
   prompt_mode_id: string

@@ -15,6 +15,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     status: "suggest",
     scene_suggestions: [],
     generated_images: [],
+    generated_image_groups: [],
     updated_at: new Date().toISOString(),
   }).eq("id", taskId)
 

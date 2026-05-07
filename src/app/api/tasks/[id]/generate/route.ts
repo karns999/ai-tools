@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateImage } from "@/lib/openrouter"
 import { convertDataImageUrlToJpeg } from "@/lib/image"
+import type { GeneratedImageGroup, GeneratedImageItem } from "@/lib/types/task"
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params
@@ -15,14 +16,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  // Set status to generating, clear previous results
-  await supabase.from("tasks").update({
+  const { data: currentTask, error: fetchError } = await supabase
+    .from("tasks")
+    .select("generated_image_groups, generated_images, selected_suggestions, failed_suggestions")
+    .eq("id", taskId)
+    .single()
+
+  if (fetchError) {
+    return NextResponse.json({ error: fetchError.message }, { status: 500 })
+  }
+
+  const currentGroups = getGeneratedImageGroups(currentTask?.generated_image_groups)
+  const existingGroups = currentGroups.length > 0
+    ? currentGroups
+    : createLegacyGeneratedImageGroups(currentTask)
+  const generationGroup: GeneratedImageGroup = {
+    id: crypto.randomUUID(),
+    index: existingGroups.length + 1,
+    selected_suggestions: indexes,
+    failed_suggestions: [],
+    images: [],
     status: "generating",
-    generated_images: [],
+    created_at: new Date().toISOString(),
+  }
+
+  // Start a new generation group, preserving previous generated images.
+  const { error: startError } = await supabase.from("tasks").update({
+    status: "generating",
     failed_suggestions: [],
     selected_suggestions: indexes,
+    generated_image_groups: [...existingGroups, generationGroup],
     updated_at: new Date().toISOString(),
   }).eq("id", taskId)
+
+  if (startError) {
+    return NextResponse.json({ error: startError.message }, { status: 500 })
+  }
 
   // Run the generation loop in the background after response is sent
   after(async () => {
@@ -49,7 +78,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const suggestion = sceneSuggestions[idx]
       if (!suggestion) {
         console.log(`[generate] task=${taskId} scene=${idx} — invalid index, skipping`)
-        await appendFailed(supabase, taskId, idx)
+        await appendFailed(supabase, taskId, generationGroup.id, idx)
         continue
       }
 
@@ -64,7 +93,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       if (error || !imageUrl) {
         console.log(`[generate] task=${taskId} scene=${idx} — FAILED: ${error}`)
-        await appendFailed(supabase, taskId, idx)
+        await appendFailed(supabase, taskId, generationGroup.id, idx)
         continue
       }
 
@@ -78,7 +107,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           buffer = await convertDataImageUrlToJpeg(imageUrl)
         } catch (err) {
           console.log(`[generate] task=${taskId} scene=${idx} — JPG CONVERT FAILED: ${(err as Error).message}`)
-          await appendFailed(supabase, taskId, idx)
+          await appendFailed(supabase, taskId, generationGroup.id, idx)
           continue
         }
 
@@ -89,31 +118,110 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         if (uploadError) {
           console.log(`[generate] task=${taskId} scene=${idx} — UPLOAD FAILED: ${uploadError.message}`)
-          await appendFailed(supabase, taskId, idx)
+          await appendFailed(supabase, taskId, generationGroup.id, idx)
           continue
         }
         finalUrl = supabase.storage.from("images").getPublicUrl(path).data.publicUrl
       }
 
-      // Append to generated_images (re-read to avoid race conditions)
-      const { data: latest } = await supabase.from("tasks").select("generated_images").eq("id", taskId).single()
-      const images = [...(latest?.generated_images ?? []), finalUrl]
-      await supabase.from("tasks").update({ generated_images: images, updated_at: new Date().toISOString() }).eq("id", taskId)
+      await appendGeneratedImage(supabase, taskId, generationGroup.id, {
+        url: finalUrl,
+        scene_index: idx,
+      })
     }
 
     // Finalize: set status based on results
-    const { data: final } = await supabase.from("tasks").select("generated_images, failed_suggestions").eq("id", taskId).single()
-    const successCount = final?.generated_images?.length ?? 0
+    const { data: final } = await supabase.from("tasks").select("generated_image_groups").eq("id", taskId).single()
+    const finalGroups = getGeneratedImageGroups(final?.generated_image_groups)
+    const finalGroup = finalGroups.find((group) => group.id === generationGroup.id)
+    const successCount = finalGroup?.images.length ?? 0
     const finalStatus = successCount > 0 ? "complete" : "failed"
-    console.log(`[generate] task=${taskId} — DONE: ${successCount} success, ${final?.failed_suggestions?.length ?? 0} failed → ${finalStatus}`)
-    await supabase.from("tasks").update({ status: finalStatus, updated_at: new Date().toISOString() }).eq("id", taskId)
+    const updatedGroups = updateGeneratedImageGroup(finalGroups, generationGroup.id, (group) => ({
+      ...group,
+      status: finalStatus,
+    }))
+    console.log(`[generate] task=${taskId} — DONE: ${successCount} success, ${finalGroup?.failed_suggestions.length ?? 0} failed → ${finalStatus}`)
+    await supabase.from("tasks").update({ status: finalStatus, generated_image_groups: updatedGroups, updated_at: new Date().toISOString() }).eq("id", taskId)
   })
 
   return NextResponse.json({ ok: true })
 }
 
-async function appendFailed(supabase: Awaited<ReturnType<typeof createClient>>, taskId: string, idx: number) {
-  const { data } = await supabase.from("tasks").select("failed_suggestions").eq("id", taskId).single()
-  const failed = [...(data?.failed_suggestions ?? []), idx]
-  await supabase.from("tasks").update({ failed_suggestions: failed, updated_at: new Date().toISOString() }).eq("id", taskId)
+function getGeneratedImageGroups(value: unknown): GeneratedImageGroup[] {
+  return Array.isArray(value) ? value as GeneratedImageGroup[] : []
+}
+
+function updateGeneratedImageGroup(
+  groups: GeneratedImageGroup[],
+  groupId: string,
+  update: (group: GeneratedImageGroup) => GeneratedImageGroup
+) {
+  return groups.map((group) => group.id === groupId ? update(group) : group)
+}
+
+function createLegacyGeneratedImageGroups(task: {
+  generated_images?: string[] | null
+  selected_suggestions?: number[] | null
+  failed_suggestions?: number[] | null
+} | null): GeneratedImageGroup[] {
+  const generatedImages = task?.generated_images ?? []
+  if (generatedImages.length === 0) return []
+
+  const failedSet = new Set(task?.failed_suggestions ?? [])
+  const sceneForImage = (task?.selected_suggestions ?? []).filter((idx) => !failedSet.has(idx))
+
+  return [{
+    id: "legacy",
+    index: 1,
+    selected_suggestions: task?.selected_suggestions ?? [],
+    failed_suggestions: task?.failed_suggestions ?? [],
+    images: generatedImages.map((url, i) => ({
+      url,
+      scene_index: sceneForImage[i] ?? i,
+    })),
+    status: "complete",
+    created_at: new Date().toISOString(),
+  }]
+}
+
+async function appendGeneratedImage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string,
+  groupId: string,
+  image: GeneratedImageItem
+) {
+  const { data } = await supabase
+    .from("tasks")
+    .select("generated_images, generated_image_groups")
+    .eq("id", taskId)
+    .single()
+
+  const groups = getGeneratedImageGroups(data?.generated_image_groups)
+  const updatedGroups = updateGeneratedImageGroup(groups, groupId, (group) => ({
+    ...group,
+    images: [...(group.images ?? []), image],
+  }))
+  const images = [...(data?.generated_images ?? []), image.url]
+
+  await supabase.from("tasks").update({
+    generated_images: images,
+    generated_image_groups: updatedGroups,
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId)
+}
+
+async function appendFailed(supabase: Awaited<ReturnType<typeof createClient>>, taskId: string, groupId: string, idx: number) {
+  const { data } = await supabase.from("tasks").select("failed_suggestions, generated_image_groups").eq("id", taskId).single()
+  const failed = [...new Set([...(data?.failed_suggestions ?? []), idx])]
+  const groups = getGeneratedImageGroups(data?.generated_image_groups)
+  const updatedGroups = updateGeneratedImageGroup(groups, groupId, (group) => ({
+    ...group,
+    failed_suggestions: [...new Set([...(group.failed_suggestions ?? []), idx])],
+  }))
+
+  await supabase.from("tasks").update({
+    failed_suggestions: failed,
+    generated_image_groups: updatedGroups,
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId)
 }

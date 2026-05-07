@@ -40,7 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import JSZip from "jszip"
 import { toast } from "sonner"
-import type { Task } from "@/lib/types/task"
+import type { GeneratedImageGroup, Task } from "@/lib/types/task"
 import type { PromptMode } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
 import { deleteTask, updateTask, uploadReferenceImages, uploadTaskMainImage, startSuggestGeneration, startImageGeneration, fetchTasks } from "./actions"
@@ -59,6 +59,118 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 }
 
 const PAGE_SIZE = 20
+
+type DisplayGeneratedImage = {
+  url: string
+  sceneIndex: number
+  globalIndex: number
+}
+
+type DisplayGeneratedImageGroup = {
+  id: string
+  index: number
+  status: GeneratedImageGroup["status"]
+  selectedSuggestions: number[]
+  failedSuggestions: number[]
+  images: DisplayGeneratedImage[]
+}
+
+function createLegacyGeneratedImageGroup(task: Task): GeneratedImageGroup | null {
+  const generatedImages = task.generated_images ?? []
+  if (generatedImages.length === 0) return null
+
+  const failedSet = new Set(task.failed_suggestions ?? [])
+  const sceneForImage = (task.selected_suggestions ?? []).filter((idx) => !failedSet.has(idx))
+
+  return {
+    id: "legacy",
+    index: 1,
+    selected_suggestions: task.selected_suggestions ?? [],
+    failed_suggestions: task.failed_suggestions ?? [],
+    images: generatedImages.map((url, i) => ({
+      url,
+      scene_index: sceneForImage[i] ?? i,
+    })),
+    status: task.status === "generating" ? "generating" : "complete",
+    created_at: task.updated_at ?? task.created_at,
+  }
+}
+
+function createOptimisticGeneratedImageGroups(task: Task, indexes: number[]): GeneratedImageGroup[] {
+  const existingGroups = Array.isArray(task.generated_image_groups) && task.generated_image_groups.length > 0
+    ? task.generated_image_groups
+    : [createLegacyGeneratedImageGroup(task)].filter(Boolean) as GeneratedImageGroup[]
+
+  return [
+    ...existingGroups,
+    {
+      id: `optimistic-${Date.now()}`,
+      index: existingGroups.length + 1,
+      selected_suggestions: indexes,
+      failed_suggestions: [],
+      images: [],
+      status: "generating",
+      created_at: new Date().toISOString(),
+    },
+  ]
+}
+
+function getGenerationProgress(task: Task) {
+  const groups = Array.isArray(task.generated_image_groups) ? task.generated_image_groups : []
+  const activeGroup = [...groups].reverse().find((group) => group.status === "generating") ?? groups.at(-1)
+
+  if (activeGroup) {
+    return {
+      done: (activeGroup.images?.length ?? 0) + (activeGroup.failed_suggestions?.length ?? 0),
+      total: activeGroup.selected_suggestions?.length ?? 0,
+    }
+  }
+
+  return {
+    done: (task.generated_images?.length ?? 0) + (task.failed_suggestions?.length ?? 0),
+    total: task.selected_suggestions?.length ?? 0,
+  }
+}
+
+function buildGeneratedImageGroups(task: Task): DisplayGeneratedImageGroup[] {
+  let globalIndex = 0
+  const groups = Array.isArray(task.generated_image_groups) ? task.generated_image_groups : []
+
+  if (groups.length > 0) {
+    return groups.map((group, groupIndex) => ({
+      id: group.id || `group-${groupIndex}`,
+      index: group.index || groupIndex + 1,
+      status: group.status || "complete",
+      selectedSuggestions: group.selected_suggestions ?? [],
+      failedSuggestions: group.failed_suggestions ?? [],
+      images: (group.images ?? [])
+        .filter((image) => image?.url)
+        .map((image) => ({
+          url: image.url,
+          sceneIndex: image.scene_index,
+          globalIndex: globalIndex++,
+        })),
+    }))
+  }
+
+  const legacyGroup = createLegacyGeneratedImageGroup(task)
+  const images = (legacyGroup?.images ?? []).map((image) => ({
+    url: image.url,
+    sceneIndex: image.scene_index,
+    globalIndex: globalIndex++,
+  }))
+
+  if (images.length === 0 && task.status !== "generating") return []
+
+  return [{
+    id: "legacy",
+    index: 1,
+    status: task.status === "generating" ? "generating" : "complete",
+    selectedSuggestions: legacyGroup?.selected_suggestions ?? task.selected_suggestions ?? [],
+    failedSuggestions: legacyGroup?.failed_suggestions ?? task.failed_suggestions ?? [],
+    images,
+  }]
+}
 
 export function TaskListClient({
   initialData,
@@ -259,8 +371,7 @@ export function TaskListClient({
                 <Badge variant="outline" className={cn("text-xs w-fit font-medium", statusConfig[task.status].className)}>
                   {statusConfig[task.status].label}
                   {task.status === "generating" && (() => {
-                    const done = (task.generated_images?.length ?? 0) + (task.failed_suggestions?.length ?? 0)
-                    const total = task.selected_suggestions?.length ?? 0
+                    const { done, total } = getGenerationProgress(task)
                     return total > 0 ? ` ${done}/${total}` : ""
                   })()}
                 </Badge>
@@ -395,6 +506,12 @@ function TaskDetail({
   const editedSceneSuggestionsRef = useRef<Record<number, string>>({})
   const mainImageInputRef = useRef<HTMLInputElement>(null)
   const refInputRef = useRef<HTMLInputElement>(null)
+  const generatedImageGroups = useMemo(() => buildGeneratedImageGroups(task), [task])
+  const flatGeneratedImages = useMemo(
+    () => generatedImageGroups.flatMap((group) => group.images),
+    [generatedImageGroups]
+  )
+  const generationProgress = useMemo(() => getGenerationProgress(task), [task])
 
   function handleReferenceFiles(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -511,7 +628,7 @@ function TaskDetail({
     setRemovedSavedRefs(new Set())
 
     // 3. Clear scene suggestions and set running status immediately
-    onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], status: "suggest" as const })
+    onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], generated_image_groups: [], status: "suggest" as const })
     setStarting(false)
 
     // 4. Start AI generation in background (server-side, doesn't depend on client)
@@ -817,11 +934,20 @@ function TaskDetail({
                   const edited = editedSceneSuggestionsRef.current[i]?.trim()
                   return edited || suggestion
                 })
-                onUpdate({ ...task, generated_images: [], failed_suggestions: [], selected_suggestions: indexes, status: "generating" as const })
+                const optimisticGroups = createOptimisticGeneratedImageGroups(task, indexes)
+                onUpdate({
+                  ...task,
+                  failed_suggestions: [],
+                  selected_suggestions: indexes,
+                  generated_image_groups: optimisticGroups,
+                  status: "generating" as const,
+                })
                 const { error } = await startImageGeneration(task.id, indexes, editedSuggestions)
                 if (error) {
                   toast.error(`启动生图失败: ${error}`)
                   onUpdate({ ...task, status: "failed" as const })
+                } else {
+                  await onRefreshTaskList()
                 }
                 setStarting(false)
               }}
@@ -832,7 +958,7 @@ function TaskDetail({
                 <ImageIcon className="size-4" />
               )}
               {task.status === "generating"
-                ? `生成中 (${(task.generated_images?.length ?? 0) + (task.failed_suggestions?.length ?? 0)}/${task.selected_suggestions?.length ?? 0})...`
+                ? `生成中 (${generationProgress.done}/${generationProgress.total})...`
                 : `开始生图（${selectedSuggestions.size} 个场景）`}
             </Button>
           </div>
@@ -840,59 +966,44 @@ function TaskDetail({
       </div>
 
       {/* Generated Images */}
-      {(task.status === "generating" || (task.generated_images && task.generated_images.length > 0)) && (() => {
-        const isGenerating = task.status === "generating"
-        const displayImages = task.generated_images ?? []
-        const selectedIndexes = task.selected_suggestions ?? []
-        const failedIndexes = task.failed_suggestions ?? []
-        const failedSet = new Set(failedIndexes)
-        // Scene index for each completed image (generated in order, skipping failed)
-        const sceneForImage = selectedIndexes.filter((idx) => !failedSet.has(idx))
-        // Remaining (pending) scene indexes for skeleton placeholders
-        const pendingScenes = isGenerating
-          ? selectedIndexes.slice(displayImages.length + failedIndexes.length)
-          : []
-        const skeletonCount = pendingScenes.length
-
-        return (
+      {generatedImageGroups.length > 0 && (
         <>
           <hr className="mb-6 border-t" />
           <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
               <Label className="text-sm font-medium">生成结果</Label>
-              {!isGenerating && task.generated_images && task.generated_images.length > 0 && (
+              {flatGeneratedImages.length > 0 && (
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      if (selectedImages.size === task.generated_images.length) {
+                      if (selectedImages.size === flatGeneratedImages.length) {
                         setSelectedImages(new Set())
                       } else {
-                        setSelectedImages(new Set(task.generated_images.map((_, i) => i)))
+                        setSelectedImages(new Set(flatGeneratedImages.map((image) => image.globalIndex)))
                       }
                     }}
                   >
                     <CheckIcon className="size-3" />
-                    {selectedImages.size === task.generated_images.length ? "取消全选" : "全选"}
+                    {selectedImages.size === flatGeneratedImages.length ? "取消全选" : "全选"}
                   </Button>
                   {selectedImages.size > 0 && (
                     <Button
                       size="sm"
                       onClick={async () => {
-                        const images = task.generated_images ?? []
                         const indexes = Array.from(selectedImages)
                         const zip = new JSZip()
-                        for (const [order, idx] of indexes.entries()) {
-                          const url = images[idx]
-                          if (!url) continue
+                        for (const [order, globalIndex] of indexes.entries()) {
+                          const image = flatGeneratedImages.find((item) => item.globalIndex === globalIndex)
+                          if (!image) continue
                           try {
-                            const res = await fetch(url)
+                            const res = await fetch(image.url)
                             const blob = await res.blob()
                             const ext = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1] || "jpg"
                             zip.file(`${order + 1}.${ext}`, blob)
                           } catch {
-                            toast.error(`图片 ${idx + 1} 获取失败`)
+                            toast.error(`图片 ${order + 1} 获取失败`)
                           }
                         }
                         const content = await zip.generateAsync({ type: "blob" })
@@ -914,91 +1025,104 @@ function TaskDetail({
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              {isGenerating ? (
-                <>
-                  {displayImages.map((url, i) => {
-                    const sceneIdx = sceneForImage[i]
-                    return (
-                      <div key={`done-${i}`} className="flex flex-col gap-1.5">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          场景 {sceneIdx !== undefined ? sceneIdx + 1 : i + 1}
-                        </p>
-                        <div
-                          className="aspect-square rounded-xl border overflow-hidden bg-muted/30 cursor-pointer"
-                          onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {Array.from({ length: skeletonCount }).map((_, i) => {
-                    const sceneIdx = pendingScenes[i]
-                    return (
-                      <div key={`skeleton-${i}`} className="flex flex-col gap-1.5">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          场景 {sceneIdx !== undefined ? sceneIdx + 1 : "?"}
-                        </p>
-                        <div className="aspect-square rounded-xl overflow-hidden">
-                          <Skeleton className="size-full rounded-none" />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </>
-              ) : (
-                task.generated_images?.map((url, i) => {
-                  const sceneIdx = sceneForImage[i]
-                  return (
-                    <div key={i} className="flex flex-col gap-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        场景 {sceneIdx !== undefined ? sceneIdx + 1 : i + 1}
-                      </p>
-                      <div
-                        className={cn(
-                          "aspect-square rounded-xl border overflow-hidden bg-muted/30 relative group cursor-pointer transition-all",
-                          selectedImages.has(i) && "ring-2 ring-blue-500"
-                        )}
-                        onClick={() => { setLightboxUrl(url); setLightboxIndex(i) }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={url} alt={`生成图 ${i + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
-                        {/* Selection checkbox */}
-                        <div
-                          className="absolute top-2 left-2"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedImages((prev) => {
-                              const next = new Set(prev)
-                              if (next.has(i)) next.delete(i)
-                              else next.add(i)
-                              return next
-                            })
-                          }}
-                        >
-                          <Checkbox
-                            checked={selectedImages.has(i)}
-                            className="bg-white/80"
-                          />
-                        </div>
-                      </div>
+
+            <div className="flex flex-col gap-6">
+              {generatedImageGroups.map((group) => {
+                const doneCount = group.images.length + group.failedSuggestions.length
+                const pendingScenes = group.status === "generating"
+                  ? group.selectedSuggestions.slice(doneCount)
+                  : []
+
+                return (
+                  <div key={group.id} className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">第 {group.index} 组</span>
+                      <Badge variant="outline" className={cn(
+                        "text-xs",
+                        group.status === "generating" && "bg-blue-100 text-blue-700 border-blue-200 animate-pulse",
+                        group.status === "complete" && "bg-green-100 text-green-700 border-green-200",
+                        group.status === "failed" && "bg-red-100 text-red-700 border-red-200"
+                      )}>
+                        {group.status === "generating" ? "生成中" : group.status === "complete" ? "已完成" : "失败"}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {doneCount}/{group.selectedSuggestions.length}
+                      </span>
                     </div>
-                  )
-                })
-              )}
+
+                    <div className="grid grid-cols-3 gap-4">
+                      {group.images.map((image) => (
+                        <div key={`${group.id}-${image.globalIndex}`} className="flex flex-col gap-1.5">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            场景 {image.sceneIndex + 1}
+                          </p>
+                          <div
+                            className={cn(
+                              "aspect-square rounded-xl border overflow-hidden bg-muted/30 relative group cursor-pointer transition-all",
+                              selectedImages.has(image.globalIndex) && "ring-2 ring-blue-500"
+                            )}
+                            onClick={() => { setLightboxUrl(image.url); setLightboxIndex(image.globalIndex) }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={image.url} alt={`生成图 ${image.globalIndex + 1}`} loading="lazy" decoding="async" className="size-full object-contain" />
+                            {group.status !== "generating" && (
+                              <div
+                                className="absolute top-2 left-2"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedImages((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(image.globalIndex)) next.delete(image.globalIndex)
+                                    else next.add(image.globalIndex)
+                                    return next
+                                  })
+                                }}
+                              >
+                                <Checkbox
+                                  checked={selectedImages.has(image.globalIndex)}
+                                  className="bg-white/80"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {group.failedSuggestions.map((sceneIdx) => (
+                        <div key={`${group.id}-failed-${sceneIdx}`} className="flex flex-col gap-1.5">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            场景 {sceneIdx + 1}
+                          </p>
+                          <div className="aspect-square rounded-xl border border-red-200 bg-red-50 text-red-700 flex items-center justify-center text-sm">
+                            生成失败
+                          </div>
+                        </div>
+                      ))}
+
+                      {pendingScenes.map((sceneIdx) => (
+                        <div key={`${group.id}-pending-${sceneIdx}`} className="flex flex-col gap-1.5">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            场景 {sceneIdx + 1}
+                          </p>
+                          <div className="aspect-square rounded-xl overflow-hidden">
+                            <Skeleton className="size-full rounded-none" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </>
-        )
-      })()}
+      )}
 
       {/* Lightbox */}
       <Dialog open={!!lightboxUrl} onOpenChange={(open) => !open && setLightboxUrl(null)}>
         <DialogContent className="!max-w-[90vw] !sm:max-w-[90vw] max-h-[90vh] w-fit p-2" showCloseButton={false}>
           {lightboxUrl && (() => {
-            const images = task.generated_images ?? []
+            const images = flatGeneratedImages.map((image) => image.url)
             const hasPrev = lightboxIndex > 0
             const hasNext = lightboxIndex < images.length - 1
             return (
