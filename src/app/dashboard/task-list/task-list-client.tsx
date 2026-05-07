@@ -18,6 +18,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   SearchIcon,
+  UploadIcon,
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -41,7 +42,7 @@ import { toast } from "sonner"
 import type { Task } from "@/lib/types/task"
 import type { PromptMode } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
-import { deleteTask, updateTask, uploadReferenceImages, startSuggestGeneration, startImageGeneration, fetchTasks } from "./actions"
+import { deleteTask, updateTask, uploadReferenceImages, uploadTaskMainImage, startSuggestGeneration, startImageGeneration, fetchTasks } from "./actions"
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: "待处理", className: "bg-neutral-200 text-neutral-700 border-neutral-300" },
@@ -176,6 +177,15 @@ export function TaskListClient({
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
   }
 
+  async function refreshTaskList() {
+    const { data, error } = await fetchTasks()
+    if (error) {
+      toast.error(error)
+      return
+    }
+    if (data) setTasks(data)
+  }
+
   return (
     <div className="flex flex-1 min-h-0">
       {/* Left: Task List */}
@@ -295,6 +305,7 @@ export function TaskListClient({
             promptMode={promptModeMap[selected.prompt_mode_id] || null}
             promptMap={promptMap}
             onUpdate={handleTaskUpdate}
+            onRefreshTaskList={refreshTaskList}
             selectedSuggestions={selectedSuggestionsMap[selected.id] || new Set()}
             onSelectedSuggestionsChange={(s) => {
               setSelectedSuggestionsMap((prev) => ({
@@ -358,6 +369,7 @@ function TaskDetail({
   promptMode,
   promptMap,
   onUpdate,
+  onRefreshTaskList,
   selectedSuggestions,
   onSelectedSuggestionsChange,
 }: {
@@ -365,17 +377,21 @@ function TaskDetail({
   promptMode: PromptMode | null
   promptMap: Record<string, Pick<Prompt, "id" | "title" | "content">>
   onUpdate: (task: Task) => void
+  onRefreshTaskList: () => Promise<void>
   selectedSuggestions: Set<number>
   onSelectedSuggestionsChange: (s: Set<number>) => void
 }) {
   const [title, setTitle] = useState(task.title || "")
   const [starting, setStarting] = useState(false)
+  const [savingTitle, setSavingTitle] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set())
+  const [uploadingMainImage, setUploadingMainImage] = useState(false)
 
   const [referenceFiles, setReferenceFiles] = useState<{ file: File; preview: string }[]>([])
   const [removedSavedRefs, setRemovedSavedRefs] = useState<Set<number>>(new Set())
+  const mainImageInputRef = useRef<HTMLInputElement>(null)
   const refInputRef = useRef<HTMLInputElement>(null)
 
   function handleReferenceFiles(files: FileList | null) {
@@ -401,6 +417,59 @@ function TaskDetail({
     setRemovedSavedRefs((prev) => new Set(prev).add(index))
   }
 
+  async function handleSaveTitle() {
+    const nextTitle = title.trim()
+    if (nextTitle === (task.title || "")) return
+
+    setSavingTitle(true)
+    try {
+      const { data, error } = await updateTask(task.id, { title: nextTitle })
+      if (error) {
+        toast.error(error)
+      } else if (data) {
+        toast.success("产品标题已保存")
+        onUpdate(data)
+        await onRefreshTaskList()
+      }
+    } catch (err) {
+      toast.error((err as Error).message || "产品标题保存失败")
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
+  async function handleMainImageFile(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      toast.error("只能上传图片文件")
+      return
+    }
+    if (task.status === "suggest" || task.status === "generating") {
+      toast.error("任务处理中，暂不能修改产品主图")
+      return
+    }
+
+    setUploadingMainImage(true)
+    try {
+      const formData = new FormData()
+      formData.append("image", file)
+
+      const { data, error } = await uploadTaskMainImage(task.id, formData)
+      if (error) {
+        toast.error(error)
+      } else if (data) {
+        toast.success("产品主图已更新")
+        onUpdate(data)
+        await onRefreshTaskList()
+      }
+    } catch (err) {
+      toast.error((err as Error).message || "产品主图上传失败")
+    } finally {
+      setUploadingMainImage(false)
+    }
+  }
+
   async function handleStart() {
     setStarting(true)
 
@@ -423,7 +492,7 @@ function TaskDetail({
     const updates: { title?: string; reference_urls: string[] } = {
       reference_urls: allRefs,
     }
-    if (!task.title && title.trim()) {
+    if (title.trim() !== (task.title || "")) {
       updates.title = title.trim()
     }
 
@@ -484,7 +553,31 @@ function TaskDetail({
       <div className="flex justify-between mb-6">
         {/* Product Image */}
         <div className="flex flex-col gap-2">
-          <Label className="text-xs text-muted-foreground">* 产品主图</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-muted-foreground">* 产品主图</Label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={uploadingMainImage || starting || task.status === "suggest" || task.status === "generating"}
+              onClick={() => mainImageInputRef.current?.click()}
+            >
+              {uploadingMainImage ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <UploadIcon className="size-3" />
+              )}
+              {uploadingMainImage ? "上传中..." : "重新上传"}
+            </Button>
+            <input
+              ref={mainImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={uploadingMainImage || starting || task.status === "suggest" || task.status === "generating"}
+              onChange={(e) => { handleMainImageFile(e.target.files); e.target.value = "" }}
+            />
+          </div>
           {task.image_url ? (
             <div className="size-52 rounded-xl border overflow-hidden bg-muted/30">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -552,16 +645,31 @@ function TaskDetail({
       {/* Product Title */}
       <div className="mb-6">
         <Label className="text-sm font-medium mb-2 block">产品标题</Label>
-        {task.title ? (
-          <p className="text-sm py-2">{task.title}</p>
-        ) : (
+        <div className="flex gap-2">
           <Input
             className="text-sm"
             placeholder="请输入产品标题"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            disabled={savingTitle || task.status === "suggest" || task.status === "generating"}
           />
-        )}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              savingTitle ||
+              title.trim() === (task.title || "") ||
+              task.status === "suggest" ||
+              task.status === "generating"
+            }
+            onClick={handleSaveTitle}
+          >
+            {savingTitle ? (
+              <Loader2Icon className="size-4 animate-spin" />
+            ) : null}
+            {savingTitle ? "保存中..." : "保存"}
+          </Button>
+        </div>
       </div>
 
       {/* Prompt Instructions */}

@@ -127,6 +127,73 @@ export async function uploadReferenceImages(
   return { urls, error: null }
 }
 
+function getImagesStoragePath(publicUrl: string) {
+  try {
+    const { pathname } = new URL(publicUrl)
+    const marker = "/storage/v1/object/public/images/"
+    const markerIndex = pathname.indexOf(marker)
+    if (markerIndex === -1) return null
+    return decodeURIComponent(pathname.slice(markerIndex + marker.length))
+  } catch {
+    const match = publicUrl.match(/\/object\/public\/images\/([^?#]+)/)
+    return match?.[1] ? decodeURIComponent(match[1]) : null
+  }
+}
+
+export async function uploadTaskMainImage(
+  taskId: string,
+  formData: FormData
+): Promise<{ data: Task | null; error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: "Unauthorized" }
+
+  const file = formData.get("image") as File | null
+  if (!file) return { data: null, error: "请选择产品主图" }
+  if (!file.type.startsWith("image/")) return { data: null, error: "只能上传图片文件" }
+
+  const { data: oldTask, error: fetchError } = await supabase
+    .from("tasks")
+    .select("image_url")
+    .eq("id", taskId)
+    .single()
+
+  if (fetchError) return { data: null, error: fetchError.message }
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || file.type.split("/")[1] || "png"
+  const path = `tasks/${crypto.randomUUID()}.${ext}`
+
+  const { error: uploadError } = await supabase.storage
+    .from("images")
+    .upload(path, file)
+
+  if (uploadError) {
+    return { data: null, error: `上传失败: ${uploadError.message}` }
+  }
+
+  const { data: urlData } = supabase.storage.from("images").getPublicUrl(path)
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ image_url: urlData.publicUrl, updated_at: new Date().toISOString() })
+    .eq("id", taskId)
+    .select()
+    .single()
+
+  if (error) {
+    await supabase.storage.from("images").remove([path])
+    return { data: null, error: error.message }
+  }
+
+  const oldPath = oldTask?.image_url ? getImagesStoragePath(oldTask.image_url) : null
+  if (oldPath && oldPath !== path) {
+    await supabase.storage.from("images").remove([oldPath])
+  }
+
+  revalidatePath("/dashboard/task-list")
+  return { data: data as Task, error: null }
+}
+
 /**
  * Start a task: set status to running, call OpenRouter for scene suggestions,
  * then update status to ready (success) or failed.
