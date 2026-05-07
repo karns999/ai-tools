@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { usePathname } from "next/navigation"
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import { PlusIcon, XIcon, ImageIcon } from "lucide-react"
 import { toast } from "sonner"
 import { createTasks } from "@/app/dashboard/task-list/actions"
 import { createClient } from "@/lib/supabase/client"
+import { cn } from "@/lib/utils"
 
 type PromptModeOption = { id: string; name: string }
 
@@ -43,17 +44,54 @@ export function CreateTaskDialog({
   const [images, setImages] = useState<ImageItem[]>([])
   const [promptModeId, setPromptModeId] = useState("")
   const [creating, setCreating] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
   const pathname = usePathname()
 
   function handleFiles(files: FileList | null) {
-    if (!files) return
-    const newItems: ImageItem[] = Array.from(files).map((file) => ({
+    if (!files || creating) return
+
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"))
+    const skippedCount = files.length - imageFiles.length
+    if (skippedCount > 0) {
+      toast.warning(`${skippedCount} 个非图片文件已跳过`)
+    }
+    if (imageFiles.length === 0) return
+
+    const newItems: ImageItem[] = imageFiles.map((file) => ({
       file,
       preview: URL.createObjectURL(file),
     }))
     setImages((prev) => [...prev, ...newItems])
+  }
+
+  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!creating) setIsDragging(true)
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = creating ? "none" : "copy"
+    if (!creating) setIsDragging(true)
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const nextTarget = e.relatedTarget
+    if (!(nextTarget instanceof Node) || !e.currentTarget.contains(nextTarget)) {
+      setIsDragging(false)
+    }
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    handleFiles(e.dataTransfer.files)
   }
 
   function removeImage(index: number) {
@@ -174,6 +212,7 @@ export function CreateTaskDialog({
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={creating}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <PlusIcon className="size-3" />
@@ -184,44 +223,73 @@ export function CreateTaskDialog({
                 type="file"
                 accept="image/*"
                 multiple
+                disabled={creating}
                 className="hidden"
                 onChange={(e) => { handleFiles(e.target.files); e.target.value = "" }}
               />
             </div>
 
-            {images.length > 0 ? (
-              <div className="grid grid-cols-4 gap-3">
-                {images.map((img, i) => (
-                  <div key={i} className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30">
-                    <img
-                      src={img.preview}
-                      alt={img.file.name}
-                      loading="lazy"
-                      decoding="async"
-                      className="size-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(i)}
-                      className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 cursor-pointer"
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                    <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
-                      {i + 1}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div
-                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-8 cursor-pointer hover:bg-muted/30 transition-colors"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <ImageIcon className="size-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">点击添加图片</p>
-              </div>
-            )}
+            <div
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {images.length > 0 ? (
+                <div
+                  className={cn(
+                    "grid grid-cols-4 gap-3 rounded-lg border border-dashed border-transparent transition-colors",
+                    isDragging && "border-indigo-500 bg-indigo-50/70"
+                  )}
+                >
+                  {images.map((img, i) => (
+                    <div key={i} className="group relative aspect-square rounded-lg border overflow-hidden bg-muted/30">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.preview}
+                        alt={img.file.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="size-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(i)}
+                        className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 cursor-pointer"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+                        {i + 1}
+                      </span>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={creating}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      "flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 text-muted-foreground transition-colors",
+                      creating ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/40"
+                    )}
+                  >
+                    <ImageIcon className="size-7 text-muted-foreground/50" />
+                    <span className="text-xs">点击或拖拽</span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-8 cursor-pointer transition-colors",
+                    isDragging ? "border-indigo-500 bg-indigo-50/70" : "hover:bg-muted/30"
+                  )}
+                  onClick={() => { if (!creating) fileInputRef.current?.click() }}
+                >
+                  <ImageIcon className="size-8 text-muted-foreground/50" />
+                  <p className="text-sm text-muted-foreground">点击或拖拽图片到这里</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <DialogFooter>
