@@ -755,16 +755,16 @@ function TaskDetail({
                       size="sm"
                       onClick={async () => {
                         const images = task.generated_images ?? []
-                        const indexes = Array.from(selectedImages).sort()
+                        const indexes = Array.from(selectedImages)
                         const zip = new JSZip()
-                        for (const idx of indexes) {
+                        for (const [order, idx] of indexes.entries()) {
                           const url = images[idx]
                           if (!url) continue
                           try {
                             const res = await fetch(url)
                             const blob = await res.blob()
-                            const ext = blob.type.split("/")[1] || "jpg"
-                            zip.file(`${task.title || "image"}_${idx + 1}.${ext}`, blob)
+                            const ext = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1] || "jpg"
+                            zip.file(`${order + 1}.${ext}`, blob)
                           } catch {
                             toast.error(`图片 ${idx + 1} 获取失败`)
                           }
