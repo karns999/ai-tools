@@ -6,7 +6,10 @@ import { convertDataImageUrlToJpeg } from "@/lib/image"
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params
-  const { indexes } = await request.json() as { indexes: number[] }
+  const { indexes, suggestions } = await request.json() as { indexes: number[]; suggestions?: string[] }
+  const suggestionOverrides = Array.isArray(suggestions)
+    ? suggestions.map((suggestion) => String(suggestion))
+    : null
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -40,10 +43,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .eq("id", task.prompt_mode_id)
       .single()
 
-    const suggestions: string[] = task.scene_suggestions ?? []
+    const sceneSuggestions: string[] = suggestionOverrides ?? task.scene_suggestions ?? []
 
     for (const idx of indexes) {
-      const suggestion = suggestions[idx]
+      const suggestion = sceneSuggestions[idx]
       if (!suggestion) {
         console.log(`[generate] task=${taskId} scene=${idx} — invalid index, skipping`)
         await appendFailed(supabase, taskId, idx)

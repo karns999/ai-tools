@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   ImageIcon,
   Trash2Icon,
@@ -391,6 +392,7 @@ function TaskDetail({
 
   const [referenceFiles, setReferenceFiles] = useState<{ file: File; preview: string }[]>([])
   const [removedSavedRefs, setRemovedSavedRefs] = useState<Set<number>>(new Set())
+  const editedSceneSuggestionsRef = useRef<Record<number, string>>({})
   const mainImageInputRef = useRef<HTMLInputElement>(null)
   const refInputRef = useRef<HTMLInputElement>(null)
 
@@ -764,20 +766,32 @@ function TaskDetail({
                 <div
                   key={i}
                   className={cn(
-                    "rounded-lg bg-neutral-100 px-4 py-3 cursor-pointer transition-all",
+                    "rounded-lg bg-neutral-100 px-4 py-3 transition-all",
                     isSelected
                       ? "ring-2 ring-blue-500 bg-blue-50"
                       : "hover:bg-neutral-200/70"
                   )}
-                  onClick={() => {
-                    const next = new Set(selectedSuggestions)
-                    if (next.has(i)) next.delete(i)
-                    else next.add(i)
-                    onSelectedSuggestionsChange(next)
-                  }}
                 >
-                  <p className="text-xs font-medium text-muted-foreground mb-1.5">场景 {i + 1}</p>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{suggestion}</p>
+                  <label className="mb-2 flex w-fit cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => {
+                        const next = new Set(selectedSuggestions)
+                        if (next.has(i)) next.delete(i)
+                        else next.add(i)
+                        onSelectedSuggestionsChange(next)
+                      }}
+                      aria-label={`选择场景 ${i + 1}`}
+                    />
+                    <span className="text-xs font-medium text-muted-foreground">场景 {i + 1}</span>
+                  </label>
+                  <Textarea
+                    defaultValue={editedSceneSuggestionsRef.current[i] ?? suggestion}
+                    onChange={(e) => {
+                      editedSceneSuggestionsRef.current[i] = e.target.value
+                    }}
+                    className="min-h-28 resize-y bg-background text-sm leading-relaxed"
+                  />
                 </div>
               )
             })}
@@ -799,8 +813,12 @@ function TaskDetail({
                 if (task.status === "generating" || starting) return
                 setStarting(true)
                 const indexes = Array.from(selectedSuggestions).sort()
+                const editedSuggestions = (task.scene_suggestions ?? []).map((suggestion, i) => {
+                  const edited = editedSceneSuggestionsRef.current[i]?.trim()
+                  return edited || suggestion
+                })
                 onUpdate({ ...task, generated_images: [], failed_suggestions: [], selected_suggestions: indexes, status: "generating" as const })
-                const { error } = await startImageGeneration(task.id, indexes)
+                const { error } = await startImageGeneration(task.id, indexes, editedSuggestions)
                 if (error) {
                   toast.error(`启动生图失败: ${error}`)
                   onUpdate({ ...task, status: "failed" as const })

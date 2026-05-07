@@ -477,7 +477,8 @@ export async function startSuggestGeneration(
 
 export async function startImageGeneration(
   taskId: string,
-  indexes: number[]
+  indexes: number[],
+  suggestions?: string[]
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -492,7 +493,7 @@ export async function startImageGeneration(
   const res = await fetch(`${protocol}://${host}/api/tasks/${taskId}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", cookie },
-    body: JSON.stringify({ indexes }),
+    body: JSON.stringify({ indexes, suggestions }),
   })
 
   if (!res.ok) {
