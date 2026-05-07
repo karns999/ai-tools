@@ -203,7 +203,7 @@ export async function generateImage({
 
   userContent.push({
     type: "text",
-    text: `请根据以上产品图片生成一张场景图。${titleNote}\n\n场景描述：${sceneSuggestion}${refNote}\n\n要求：保持产品主体清晰完整，场景自然融合，画面高质量。`,
+    text: `请根据以上产品图片生成一张场景图。${titleNote}\n\n场景描述：${sceneSuggestion}${refNote}\n\n要求：\n1. 保持产品主体清晰完整，场景自然融合，画面高质量。\n2. 输出图片格式必须是 JPG/JPEG，不要输出 PNG、WebP、GIF 或其他格式。`,
   })
 
   const messages: OpenRouterMessage[] = [
@@ -255,7 +255,7 @@ export async function generateImage({
 
   // If content is very long, it might be base64 without prefix
   if (content.length > 1000 && !content.includes(" ")) {
-    return { imageUrl: `data:image/png;base64,${content}`, error: null }
+    return { imageUrl: `data:image/jpeg;base64,${content}`, error: null }
   }
 
   return { imageUrl: null, error: "Unable to extract image from AI response" }

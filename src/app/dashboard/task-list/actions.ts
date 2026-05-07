@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { generateSceneSuggestions, generateImage } from "@/lib/openrouter"
+import { convertDataImageUrlToJpeg } from "@/lib/image"
 import type { Task } from "@/lib/types/task"
 import { revalidatePath } from "next/cache"
 
@@ -288,15 +289,22 @@ export async function generateSingleImage(
   // Upload to Supabase Storage if base64
   let finalUrl = imageUrl
   if (imageUrl.startsWith("data:image/")) {
-    const base64Data = imageUrl.split(",")[1]
-    const mimeMatch = imageUrl.match(/data:(image\/\w+);/)
-    const ext = mimeMatch ? mimeMatch[1].split("/")[1] : "png"
-    const path = `generated/${crypto.randomUUID()}.${ext}`
+    let buffer: Buffer
+    try {
+      buffer = await convertDataImageUrlToJpeg(imageUrl)
+    } catch (err) {
+      console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — JPG CONVERT FAILED: ${(err as Error).message}`)
+      const currentFailed: number[] = task.failed_suggestions ?? []
+      const newFailed = [...currentFailed, sceneIndex]
+      await supabase.from("tasks").update({ failed_suggestions: newFailed, updated_at: new Date().toISOString() }).eq("id", taskId)
+      await checkAndFinalize((task.generated_images ?? []).length, newFailed.length)
+      return { imageUrl: null, error: `JPG conversion failed: ${(err as Error).message}` }
+    }
 
-    const buffer = Buffer.from(base64Data, "base64")
+    const path = `generated/${crypto.randomUUID()}.jpg`
     const { error: uploadError } = await supabase.storage
       .from("images")
-      .upload(path, buffer, { contentType: mimeMatch?.[1] ?? "image/png" })
+      .upload(path, buffer, { contentType: "image/jpeg" })
 
     if (uploadError) {
       console.log(`[generateSingleImage] task=${taskId} scene=${sceneIndex} — UPLOAD FAILED: ${uploadError.message}`)

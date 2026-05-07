@@ -2,6 +2,7 @@ import { after } from "next/server"
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateImage } from "@/lib/openrouter"
+import { convertDataImageUrlToJpeg } from "@/lib/image"
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params
@@ -69,14 +70,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // Upload base64 to storage if needed
       let finalUrl = imageUrl
       if (imageUrl.startsWith("data:image/")) {
-        const base64Data = imageUrl.split(",")[1]
-        const mimeMatch = imageUrl.match(/data:(image\/\w+);/)
-        const ext = mimeMatch ? mimeMatch[1].split("/")[1] : "png"
-        const path = `generated/${crypto.randomUUID()}.${ext}`
-        const buffer = Buffer.from(base64Data, "base64")
+        let buffer: Buffer
+        try {
+          buffer = await convertDataImageUrlToJpeg(imageUrl)
+        } catch (err) {
+          console.log(`[generate] task=${taskId} scene=${idx} — JPG CONVERT FAILED: ${(err as Error).message}`)
+          await appendFailed(supabase, taskId, idx)
+          continue
+        }
+
+        const path = `generated/${crypto.randomUUID()}.jpg`
         const { error: uploadError } = await supabase.storage
           .from("images")
-          .upload(path, buffer, { contentType: mimeMatch?.[1] ?? "image/png" })
+          .upload(path, buffer, { contentType: "image/jpeg" })
 
         if (uploadError) {
           console.log(`[generate] task=${taskId} scene=${idx} — UPLOAD FAILED: ${uploadError.message}`)
