@@ -43,7 +43,9 @@ import { toast } from "sonner"
 import type { GeneratedImageGroup, Task } from "@/lib/types/task"
 import type { PromptMode } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
-import { deleteTask, updateTask, uploadReferenceImages, uploadTaskMainImage, startSuggestGeneration, startImageGeneration, fetchTasks } from "./actions"
+import { createClient } from "@/lib/supabase/client"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/format-date"
+import { deleteTask, updateTask, uploadTaskMainImage, fetchTasks } from "./actions"
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: "待处理", className: "bg-neutral-200 text-neutral-700 border-neutral-300" },
@@ -59,6 +61,62 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 }
 
 const PAGE_SIZE = 20
+
+async function postJson<T>(
+  url: string,
+  body?: unknown
+): Promise<{ data: T | null; error: string | null }> {
+  const res = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  const payload = await res.json().catch(() => null) as ({ error?: string } & T) | null
+  if (!res.ok) {
+    return { data: null, error: payload?.error ?? `Failed (${res.status})` }
+  }
+
+  return { data: payload, error: null }
+}
+
+async function startSuggestGenerationRequest(taskId: string) {
+  return postJson<{ ok: true }>(`/api/tasks/${encodeURIComponent(taskId)}/suggest`)
+}
+
+async function startImageGenerationRequest(
+  taskId: string,
+  indexes: number[],
+  suggestions: string[]
+) {
+  return postJson<{ ok: true }>(`/api/tasks/${encodeURIComponent(taskId)}/generate`, {
+    indexes,
+    suggestions,
+  })
+}
+
+async function uploadReferenceFiles(files: { file: File }[]) {
+  if (files.length === 0) return { urls: [] as string[], error: null }
+
+  const supabase = createClient()
+  const urls: string[] = []
+
+  for (const { file } of files) {
+    const ext = file.name.split(".").pop()?.toLowerCase() || file.type.split("/")[1] || "png"
+    const path = `references/${crypto.randomUUID()}.${ext}`
+
+    const { error } = await supabase.storage.from("images").upload(path, file)
+    if (error) {
+      return { urls: [] as string[], error: `上传失败: ${error.message}` }
+    }
+
+    const { data } = supabase.storage.from("images").getPublicUrl(path)
+    urls.push(data.publicUrl)
+  }
+
+  return { urls, error: null }
+}
 
 type DisplayGeneratedImage = {
   url: string
@@ -212,16 +270,6 @@ export function TaskListClient({
     [filteredTasks, pageIndex]
   )
 
-  // Reset to first page when search changes
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [searchQuery])
-
-  // Clamp current page when filtered result shrinks (e.g. after delete / poll)
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages)
-  }, [currentPage, totalPages])
-
   // Poll for task updates every 5 seconds when any task is in a processing state
   useEffect(() => {
     const hasProcessing = tasks.some((t) => t.status === "suggest" || t.status === "generating")
@@ -324,14 +372,20 @@ export function TaskListClient({
             <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setCurrentPage(1)
+              }}
               placeholder="搜索标题或创建人"
               className="pl-8 pr-8 h-9"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery("")}
+                onClick={() => {
+                  setSearchQuery("")
+                  setCurrentPage(1)
+                }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                 aria-label="Clear search"
               >
@@ -366,7 +420,7 @@ export function TaskListClient({
               <div className="flex-1 min-w-0 flex flex-col gap-2">
                 <span className="text-sm font-medium truncate">{task.title || ""}</span>
                 <span className="text-sm text-muted-foreground">
-                  {new Date(task.created_at).toLocaleDateString("zh-CN")}
+                  {formatDisplayDate(task.created_at)}
                 </span>
                 <Badge variant="outline" className={cn("text-xs w-fit font-medium", statusConfig[task.status].className)}>
                   {statusConfig[task.status].label}
@@ -592,49 +646,53 @@ function TaskDetail({
   async function handleStart() {
     setStarting(true)
 
-    // 1. Upload new reference images if any
-    let newRefUrls: string[] = []
-    if (referenceFiles.length > 0) {
-      const formData = new FormData()
-      referenceFiles.forEach((f) => formData.append("references", f.file))
-      const { urls, error: uploadError } = await uploadReferenceImages(formData)
+    try {
+      // 1. Upload new reference images if any
+      const { urls: newRefUrls, error: uploadError } = await uploadReferenceFiles(referenceFiles)
       if (uploadError) {
         toast.error(uploadError)
         setStarting(false)
         return
       }
-      newRefUrls = urls ?? []
-    }
 
-    // 2. Save title + reference_urls first
-    const allRefs = [...activeSavedRefs, ...newRefUrls]
-    const updates: { title?: string; reference_urls: string[] } = {
-      reference_urls: allRefs,
-    }
-    if (title.trim() !== (task.title || "")) {
-      updates.title = title.trim()
-    }
+      // 2. Save title + reference_urls first
+      const allRefs = [...activeSavedRefs, ...newRefUrls]
+      const updates: { title?: string; reference_urls: string[] } = {
+        reference_urls: allRefs,
+      }
+      if (title.trim() !== (task.title || "")) {
+        updates.title = title.trim()
+      }
 
-    const { error: saveError } = await updateTask(task.id, updates)
-    if (saveError) {
-      toast.error(saveError)
+      const { error: saveError } = await updateTask(task.id, updates)
+      if (saveError) {
+        toast.error(saveError)
+        setStarting(false)
+        return
+      }
+
+      // Clean up local previews
+      referenceFiles.forEach((f) => URL.revokeObjectURL(f.preview))
+      setReferenceFiles([])
+      setRemovedSavedRefs(new Set())
+
+      // 3. Clear scene suggestions and set running status immediately
+      onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], generated_image_groups: [], status: "suggest" as const })
       setStarting(false)
-      return
+
+      // 4. Start AI generation in background.
+      void startSuggestGenerationRequest(task.id).then(async ({ error }) => {
+        if (!error) return
+        toast.error(`启动场景建议失败: ${error}`)
+        await onRefreshTaskList()
+      }).catch(async (err) => {
+        toast.error((err as Error).message || "启动场景建议失败")
+        await onRefreshTaskList()
+      })
+    } catch (err) {
+      toast.error((err as Error).message || "开始任务失败")
+      setStarting(false)
     }
-
-    // Clean up local previews
-    referenceFiles.forEach((f) => URL.revokeObjectURL(f.preview))
-    setReferenceFiles([])
-    setRemovedSavedRefs(new Set())
-
-    // 3. Clear scene suggestions and set running status immediately
-    onUpdate({ ...task, ...(updates.title ? { title: updates.title } : {}), reference_urls: allRefs, scene_suggestions: [], generated_images: [], generated_image_groups: [], status: "suggest" as const })
-    setStarting(false)
-
-    // 4. Start AI generation in background (server-side, doesn't depend on client)
-    startSuggestGeneration(task.id).then(({ error }) => {
-      if (error) toast.error(error)
-    })
   }
 
   // Active saved reference images (excluding removed ones)
@@ -657,7 +715,7 @@ function TaskDetail({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{task.creator}</span>
           <span>·</span>
-          <span>{new Date(task.created_at).toLocaleString("zh-CN")}</span>
+          <span>{formatDisplayDateTime(task.created_at)}</span>
           <button
             onClick={() => { navigator.clipboard.writeText(task.id); toast.success("已复制任务 ID") }}
             className="cursor-pointer text-muted-foreground hover:text-foreground ml-1"
@@ -942,7 +1000,7 @@ function TaskDetail({
                   generated_image_groups: optimisticGroups,
                   status: "generating" as const,
                 })
-                const { error } = await startImageGeneration(task.id, indexes, editedSuggestions)
+                const { error } = await startImageGenerationRequest(task.id, indexes, editedSuggestions)
                 if (error) {
                   toast.error(`启动生图失败: ${error}`)
                   onUpdate({ ...task, status: "failed" as const })

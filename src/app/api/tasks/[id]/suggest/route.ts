@@ -3,21 +3,26 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateSceneSuggestions } from "@/lib/openrouter"
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params
+  if (!taskId) return NextResponse.json({ error: "Task id is required" }, { status: 400 })
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   // Set status to suggest immediately
-  await supabase.from("tasks").update({
+  const { error: startError } = await supabase.from("tasks").update({
     status: "suggest",
     scene_suggestions: [],
     generated_images: [],
     generated_image_groups: [],
     updated_at: new Date().toISOString(),
   }).eq("id", taskId)
+
+  if (startError) {
+    return NextResponse.json({ error: startError.message }, { status: 500 })
+  }
 
   after(async () => {
     const supabase = await createClient()

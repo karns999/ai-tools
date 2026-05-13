@@ -56,6 +56,7 @@ import {
 import { EllipsisVerticalIcon, PlusIcon, CopyIcon, Trash2Icon, XIcon } from "lucide-react"
 import type { PromptMode, QuickSelection } from "@/lib/types/prompt-mode"
 import type { Prompt } from "@/lib/types/prompt"
+import { formatDisplayDate } from "@/lib/format-date"
 import { createPromptMode, updatePromptMode, deletePromptMode } from "./actions"
 import { toast } from "sonner"
 
@@ -132,7 +133,7 @@ function PromptSelector({
         </div>
       )}
       {selected.length === 0 && (
-        <p className="text-xs text-muted-foreground">点击"添加"来添加 Prompt</p>
+        <p className="text-xs text-muted-foreground">点击&quot;添加&quot;来添加 Prompt</p>
       )}
     </div>
   )
@@ -348,7 +349,7 @@ export function PromptModeListClient({
     {
       accessorKey: "created_at",
       header: "Created At",
-      cell: ({ row }) => { const d = row.getValue("created_at") as string; return d ? new Date(d).toLocaleDateString("zh-CN") : "-" },
+      cell: ({ row }) => formatDisplayDate(row.getValue("created_at") as string),
     },
     {
       id: "actions",

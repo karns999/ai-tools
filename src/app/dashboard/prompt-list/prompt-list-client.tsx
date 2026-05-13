@@ -47,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { EllipsisVerticalIcon, PlusIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import type { Prompt } from "@/lib/types/prompt"
+import { formatDisplayDate } from "@/lib/format-date"
 import { createPrompt, updatePrompt, deletePrompt } from "./actions"
 import { toast } from "sonner"
 
@@ -186,7 +187,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       header: "创建时间",
       cell: ({ row }) => {
         const date = row.getValue("created_at") as string
-        return date ? new Date(date).toLocaleDateString("zh-CN") : "-"
+        return formatDisplayDate(date)
       },
     },
     { accessorKey: "updater", header: "更新者", cell: ({ row }) => row.getValue("updater") || "-" },
@@ -195,7 +196,7 @@ export function PromptListClient({ initialData }: { initialData: Prompt[] }) {
       header: "更新时间",
       cell: ({ row }) => {
         const date = row.getValue("updated_at") as string
-        return date ? new Date(date).toLocaleDateString("zh-CN") : "-"
+        return formatDisplayDate(date)
       },
     },
     {

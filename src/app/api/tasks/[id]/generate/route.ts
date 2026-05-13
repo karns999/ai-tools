@@ -7,7 +7,23 @@ import type { GeneratedImageGroup, GeneratedImageItem } from "@/lib/types/task"
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params
-  const { indexes, suggestions } = await request.json() as { indexes: number[]; suggestions?: string[] }
+  if (!taskId) return NextResponse.json({ error: "Task id is required" }, { status: 400 })
+
+  let body: { indexes?: unknown; suggestions?: unknown }
+  try {
+    body = await request.json() as { indexes?: unknown; suggestions?: unknown }
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+
+  const { indexes, suggestions } = body
+  if (!Array.isArray(indexes) || indexes.some((index) => !Number.isInteger(index))) {
+    return NextResponse.json({ error: "indexes must be an array of integers" }, { status: 400 })
+  }
+  if (suggestions !== undefined && !Array.isArray(suggestions)) {
+    return NextResponse.json({ error: "suggestions must be an array when provided" }, { status: 400 })
+  }
+
   const suggestionOverrides = Array.isArray(suggestions)
     ? suggestions.map((suggestion) => String(suggestion))
     : null
